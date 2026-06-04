@@ -23,7 +23,7 @@ export function collectPsdlRefs(packet: Packet): Set<string> {
   const walk = (containers: Container[]): void => {
     for (const c of containers) {
       if (isField(c)) {
-        if (c.type.kind === "bytes" && c.type.n !== "auto") visit(c.type.n);
+        if (c.type.kind === "bytes") visit(c.type.n);
         if (c.computedFrom) visit(c.computedFrom);
         continue;
       }

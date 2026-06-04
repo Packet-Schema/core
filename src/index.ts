@@ -95,7 +95,7 @@ export {
 } from "./expr.js";
 
 // Normalize
-export { normalize, initialEnv, typeBits, berLenEnvKey, selectArm } from "./normalize.js";
+export { normalize, initialEnv, typeBits, berLenEnvKey, varintBitsEnvKey, selectArm } from "./normalize.js";
 export type { NormalizeOptions } from "./normalize.js";
 
 // Layout

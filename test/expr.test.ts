@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   cond, evalExpr, evalExprOr, exprContains, exprRefs, lit, lookup, op, peek,
   peekEnvKey, ref, remaining, remainingEnvKey, wireSize, wireSizeEnvKey,
-  MissingRefError,
+  prevIter, prevIterEnvKey, enclosingBits, enclosingBitsEnvKey,
+  enclosingField, enclosingFieldEnvKey, MissingRefError,
 } from "../src/expr.js";
-import type { PacketEnv } from "../src/types.js";
+import type { Expr, PacketEnv } from "../src/types.js";
 
 const env = (entries: Record<string, number> = {}): PacketEnv =>
   new Map(Object.entries(entries));
@@ -65,6 +66,38 @@ describe("evalExpr — context-dependent kinds", () => {
   it("remaining / wireSize read reserved env keys", () => {
     expect(evalExpr(remaining(), env({ [remainingEnvKey()]: 12 }))).toBe(12);
     expect(evalExpr(wireSize("hdr"), env({ [wireSizeEnvKey("hdr")]: 20 }))).toBe(20);
+  });
+
+  it("evaluates shifts: unsigned 32-bit << and arithmetic >> (§4)", () => {
+    expect(evalExpr(op("<<", lit(1), lit(4)), env())).toBe(16);
+    expect(evalExpr(op(">>", lit(256), lit(2)), env())).toBe(64);
+    // Left shift is masked to an unsigned 32-bit result: 1 << 31 is the
+    // unsigned wire value 2147483648, not the signed -2147483648 (§4, fix #1).
+    expect(evalExpr(op("<<", lit(1), lit(31)), env())).toBe(2147483648);
+    expect(evalExpr(op("==", op("<<", lit(1), lit(31)), lit(2147483648)), env())).toBe(1);
+    // Right shift is arithmetic (sign-propagating) per §4: 0x80000003 read as a
+    // signed 32-bit integer is negative, so >> 1 sign-extends.
+    expect(evalExpr(op(">>", lit(0x80000003), lit(1)), env())).toBe(-1073741823);
+    // A non-negative operand shifts identically to the logical form.
+    expect(evalExpr(op(">>", lit(0x40000000), lit(1)), env())).toBe(0x20000000);
+  });
+
+  it("prevIter / enclosingBits / enclosingField read reserved keys, default 0", () => {
+    expect(evalExpr(prevIter("x"), env({ [prevIterEnvKey("x")]: 9 }))).toBe(9);
+    expect(evalExpr(prevIter("x"), env())).toBe(0);
+    expect(evalExpr(enclosingBits(), env({ [enclosingBitsEnvKey()]: 64 }))).toBe(64);
+    expect(evalExpr(enclosingBits(), env())).toBe(0);
+    expect(evalExpr(enclosingField("y"), env({ [enclosingFieldEnvKey("y")]: 7 }))).toBe(7);
+    expect(evalExpr(enclosingField("y"), env())).toBe(0);
+  });
+
+  it("peek reads at a non-zero computed offset", () => {
+    expect(evalExpr(peek(8, lit(2)), env({ [peekEnvKey(2, 8)]: 0xab }))).toBe(0xab);
+  });
+
+  it("throws on an unknown operator", () => {
+    const bad = { kind: "op", op: "??", a: lit(1), b: lit(2) } as unknown as Expr;
+    expect(() => evalExpr(bad, env())).toThrow(/unknown operator/);
   });
 });
 

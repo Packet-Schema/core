@@ -787,7 +787,6 @@ optional, repeat, switch, align, bounded, and encrypted).
 | `ref` | yes | Target def name (local `defs` key or import-qualified, §1.2) |
 | `id` | yes | Instantiation id; becomes the prefix of the expanded field ids |
 | `name` | no | Human-readable label |
-| `doc` | no | Description for LSP hover |
 
 See §6 for expansion rules (transparent scope inheritance, the
 `{ref.id}.{field.id}` and repeat-indexed `{ref.id}.{field.id}#N` id forms).

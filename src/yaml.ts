@@ -16,7 +16,7 @@ const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !
  * Authoring shorthand normalization (§4):
  *   bare integer N  → { kind: lit, value: N }
  *   bare string "f" → { kind: ref, field: "f" }
- * Applied only in expression slots; "eos"/"auto" sentinels are preserved.
+ * Applied only in expression slots; the "eos" sentinel is preserved.
  * ------------------------------------------------------------------ */
 
 function toExpr(v: unknown): unknown {
@@ -58,7 +58,7 @@ function normContainer(node: unknown): unknown {
   const kind = o.kind;
   if (kind === undefined || kind === "field") {
     const t = o.type;
-    if (isObj(t) && t.kind === "bytes" && t.n !== "auto" && t.n !== undefined)
+    if (isObj(t) && t.kind === "bytes" && t.n !== undefined)
       o.type = { ...t, n: toExpr(t.n) };
     return o;
   }

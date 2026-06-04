@@ -31,8 +31,8 @@ export const CATEGORY_TOKENS: readonly CategoryToken[] = [
 
 export type TypeInt = { kind: "int"; bits: number; signed?: boolean };
 export type TypeBits = { kind: "bits"; n: number };
-/** `n: "auto"` is sugar for `{ kind: bytes, n: { kind: remaining } }` (§3). */
-export type TypeBytes = { kind: "bytes"; n: Expr | "auto" };
+/** Variable-length byte array; use `n: { kind: remaining }` for "all remaining" (§3). */
+export type TypeBytes = { kind: "bytes"; n: Expr };
 
 export type EnumVariantObj = { label: string; doc?: string };
 export type EnumVariant = string | EnumVariantObj;
@@ -40,6 +40,12 @@ export type EnumVariant = string | EnumVariantObj;
 export type TypeEnum = {
   kind: "enum";
   bits: number;
+  /**
+   * Variant table keyed by the numeric enum value. NOTE: on the wire / after
+   * YAML/JSON parse these keys are *strings* (the schema keys `variants` by
+   * stringified non-negative decimal integers such as "6", "17"); the `number`
+   * index signature is a convenience — TS coerces numeric indexing to strings.
+   */
   variants: Record<number, EnumVariant>;
 };
 
@@ -81,8 +87,14 @@ export type ExprLit = { kind: "lit"; value: number };
 export type ExprRef = { kind: "ref"; field: string };
 export type ExprOp = { kind: "op"; op: BinOp; a: Expr; b: Expr };
 export type ExprCond = { kind: "cond"; test: Expr; t: Expr; f: Expr };
+/** Look ahead without advancing the cursor (§10.6). `bits` is 1–64. */
 export type ExprPeek = { kind: "peek"; bits: number; offset?: Expr };
-/** Discrete table lookup; missing key → 0 (§4). */
+/**
+ * Discrete table lookup; missing key → 0 (§4). NOTE: as with enum variants,
+ * `table` keys are stringified non-negative decimal integers on the wire (the
+ * schema constrains `propertyNames` to `^(0|[1-9][0-9]*)$`); the `number` index
+ * signature is a convenience that TS coerces to string keys at runtime.
+ */
 export type ExprLookup = { kind: "lookup"; key: Expr; table: Record<number, number> };
 /** Wire byte footprint of a named container/field (§4). */
 export type ExprWireSize = { kind: "wireSize"; target: string };
@@ -184,7 +196,6 @@ export type Optional = {
 /** Anonymous struct used as Repeat.element / Switch arm / Encrypted.plaintext. */
 export type Struct = {
   id: string;
-  name?: string;
   doc?: string;
   meta?: FieldMeta;
   fields: Container[];
@@ -201,7 +212,7 @@ export type NamedStruct = {
 export type Group = {
   kind: "group";
   id: string;
-  name?: string;
+  name: string;
   doc?: string;
   meta?: FieldMeta;
   category?: CategoryToken;
@@ -251,7 +262,9 @@ export type RefContainer = {
 /** Aligns the parse cursor to a bit boundary measured from the wire origin (§5). */
 export type Align = {
   kind: "align";
+  /** Boundary in bits; must be a positive power of 2 that is a multiple of 8. */
   to: number;
+  /** Padding byte value, 0–255 (default 0). */
   fill?: number;
   id?: string;
   doc?: string;

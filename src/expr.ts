@@ -61,8 +61,19 @@ export function evalExpr(expr: Expr, env: PacketEnv): number {
           return Math.trunc(a / b);
         case "%":
           if (b === 0) throw new Error("evalExpr: modulo by zero");
+          // §4 pairs `%` with truncated-division `/` ("truncates toward zero"),
+          // so `%` follows JS remainder semantics: the result takes the sign of
+          // the dividend (e.g. (1-3) % 4 === -2, NOT the Euclidean 2). The spec
+          // does not define a Euclidean modulo; authors must not assume one.
+          // Spec keys/table values are non-negative, so a negative left operand
+          // here reflects authored arithmetic, not a normalization choice.
           return a % b;
-        case "<<": return (a << b) | 0;
+        // Left shift masked to an unsigned 32-bit result (§4): JS `<<` is
+        // signed, so a high-bit shift like `1 << 31` would yield a negative
+        // number; `>>> 0` reinterprets it as the unsigned wire value.
+        case "<<": return (a << b) >>> 0;
+        // Arithmetic (sign-propagating) right shift, per §4 "Arithmetic right
+        // shift; operates on 32-bit integers."
         case ">>": return a >> b;
         case "==": return a === b ? 1 : 0;
         case "!=": return a !== b ? 1 : 0;
@@ -70,6 +81,11 @@ export function evalExpr(expr: Expr, env: PacketEnv): number {
         case "<=": return a <= b ? 1 : 0;
         case ">":  return a > b ? 1 : 0;
         case ">=": return a >= b ? 1 : 0;
+        // §4 (Note on 64-bit fields): bitwise and shift operators are evaluated
+        // as 32-bit integers BY DESIGN — JS `&|^` coerce operands via ToInt32,
+        // so a value wider than 32 bits is truncated and a high bit may flip the
+        // sign. This is the documented spec contract: for fields wider than 32
+        // bits, authors must use arithmetic operators and `cond`, not bit ops.
         case "&":  return (a & b) | 0;
         case "|":  return (a | b) | 0;
         case "^":  return (a ^ b) | 0;

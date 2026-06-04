@@ -41,7 +41,9 @@ body:
     expect(rep.count).toEqual({ kind: "lit", value: 4 });
   });
 
-  it("preserves eos and auto sentinels", () => {
+  it("preserves the eos sentinel and the remaining bytes length", () => {
+    // §3: there is no `auto` sugar; "all remaining bytes" is written explicitly
+    // as n: { kind: remaining } (finding #13 — schema/spec are the source of truth).
     const src = `
 name: t
 body:
@@ -53,14 +55,14 @@ body:
       fields:
         - id: x
           name: X
-          type: { kind: bytes, n: auto }
+          type: { kind: bytes, n: { kind: remaining } }
 `;
     const r = parsePsdl(src);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     const rep = r.packet.body[0] as { count: unknown; element: { fields: { type: { n: unknown } }[] } };
     expect(rep.count).toBe("eos");
-    expect(rep.element.fields[0]!.type.n).toBe("auto");
+    expect(rep.element.fields[0]!.type.n).toEqual({ kind: "remaining" });
   });
 
   it("reports validation errors", () => {

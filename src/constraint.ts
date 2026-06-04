@@ -44,6 +44,11 @@ function evalConst(expr: Expr, env: PacketEnv): number | null {
   }
 }
 
+// Invert `a OP known = result` for `a` (the unknown on the LEFT operand).
+// Shifts use the semantics of expr.ts (`<<` → `(a<<b)>>>0` unsigned, `>>` →
+// arithmetic `a>>b`, §4). They are lossy and not uniquely invertible, so the
+// candidate produced here is verified by re-evaluation in applyKnownSide
+// before adoption.
 function invertLeft(o: string, result: number, known: number): number | null {
   switch (o) {
     case "+": return result - known;
@@ -51,12 +56,13 @@ function invertLeft(o: string, result: number, known: number): number | null {
     case "*": return known === 0 ? null : Math.trunc(result / known);
     case "/": return result * known;
     case "%": return null;
-    case "<<": return result >> known;
-    case ">>": return (result << known) | 0;
+    case "<<": return result >>> known;        // inverse of (a << known)>>>0
+    case ">>": return (result << known) | 0;    // inverse of arithmetic a >> known
   }
   return null;
 }
 
+// Invert `known OP b = result` for `b` (the unknown on the RIGHT operand).
 function invertRight(o: string, result: number, known: number): number | null {
   switch (o) {
     case "+": return result - known;
@@ -64,6 +70,7 @@ function invertRight(o: string, result: number, known: number): number | null {
     case "*": return known === 0 ? null : Math.trunc(result / known);
     case "/": return result === 0 ? null : Math.trunc(known / result);
     case "%": return null;
+    // Shift amount as the unknown is not soundly invertible.
     case "<<": return null;
     case ">>": return null;
   }
@@ -94,7 +101,15 @@ function applyKnownSide(
   }
   if (unknowns.length === 1) {
     const solved = solveFor(other, unknowns[0]!, known, next);
-    if (solved !== null) next.set(unknowns[0]!, solved);
+    if (solved !== null) {
+      // Inversion through lossy operators (shifts, truncating division) is not
+      // guaranteed to round-trip under the unsigned evaluator. Adopt the solved
+      // value only if re-evaluating `other` actually reproduces `known`.
+      const probe: PacketEnv = new Map(next);
+      probe.set(unknowns[0]!, solved);
+      const check = evalConst(other, probe);
+      if (check === known) next.set(unknowns[0]!, solved);
+    }
   }
   return null;
 }

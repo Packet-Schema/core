@@ -1,24 +1,33 @@
-import type { Expr, PacketEnv } from "./types.js";
+import type { BinOp, Expr, ExprWireSize, PacketEnv } from "./types.js";
+
+/* ------------------------------------------------------------------ *
+ * Expression constructors (authoring helpers)
+ * ------------------------------------------------------------------ */
 
 export const lit = (value: number): Expr => ({ kind: "lit", value });
 export const ref = (field: string): Expr => ({ kind: "ref", field });
-export const op = (
-  o: "+" | "-" | "*" | "/" | "%" | "<<" | ">>",
-  a: Expr,
-  b: Expr,
-): Expr => ({ kind: "op", op: o, a, b });
-export const cond = (test: Expr, t: Expr, f: Expr): Expr => ({
-  kind: "cond",
-  test,
-  t,
-  f,
-});
+export const op = (o: BinOp, a: Expr, b: Expr): Expr => ({ kind: "op", op: o, a, b });
+export const cond = (test: Expr, t: Expr, f: Expr): Expr => ({ kind: "cond", test, t, f });
 export const peek = (bits: number, offset?: Expr): Expr =>
   offset === undefined ? { kind: "peek", bits } : { kind: "peek", bits, offset };
+export const lookup = (key: Expr, table: Record<number, number>): Expr => ({ kind: "lookup", key, table });
+export const wireSize = (target: string): ExprWireSize => ({ kind: "wireSize", target });
+export const prevIter = (field: string): Expr => ({ kind: "prevIter", field });
+export const remaining = (): Expr => ({ kind: "remaining" });
+export const enclosingBits = (): Expr => ({ kind: "enclosingBits" });
+export const enclosingField = (field: string): Expr => ({ kind: "enclosingField", field });
 
-export function peekEnvKey(offset: number, bits: number): string {
-  return `__peek__${offset}__${bits}`;
-}
+/* ------------------------------------------------------------------ *
+ * Reserved env keys for context-dependent expressions.
+ * normalize injects these so evalExpr stays pure (§4, §10).
+ * ------------------------------------------------------------------ */
+
+export const peekEnvKey = (offset: number, bits: number): string => `__peek__${offset}__${bits}`;
+export const remainingEnvKey = (): string => "__remaining__";
+export const enclosingBitsEnvKey = (): string => "__enclosingBits__";
+export const wireSizeEnvKey = (target: string): string => `__wireSize__${target}`;
+export const prevIterEnvKey = (field: string): string => `__prevIter__${field}`;
+export const enclosingFieldEnvKey = (field: string): string => `__enclosing__${field}`;
 
 export class MissingRefError extends Error {
   constructor(public readonly field: string) {
@@ -26,6 +35,10 @@ export class MissingRefError extends Error {
     this.name = "MissingRefError";
   }
 }
+
+/* ------------------------------------------------------------------ *
+ * Evaluator
+ * ------------------------------------------------------------------ */
 
 export function evalExpr(expr: Expr, env: PacketEnv): number {
   switch (expr.kind) {
@@ -51,6 +64,15 @@ export function evalExpr(expr: Expr, env: PacketEnv): number {
           return a % b;
         case "<<": return (a << b) | 0;
         case ">>": return a >> b;
+        case "==": return a === b ? 1 : 0;
+        case "!=": return a !== b ? 1 : 0;
+        case "<":  return a < b ? 1 : 0;
+        case "<=": return a <= b ? 1 : 0;
+        case ">":  return a > b ? 1 : 0;
+        case ">=": return a >= b ? 1 : 0;
+        case "&":  return (a & b) | 0;
+        case "|":  return (a | b) | 0;
+        case "^":  return (a ^ b) | 0;
         default: {
           const bad = expr.op as string;
           throw new Error(`evalExpr: unknown operator "${bad}"`);
@@ -63,9 +85,24 @@ export function evalExpr(expr: Expr, env: PacketEnv): number {
     }
     case "peek": {
       const offsetVal = expr.offset !== undefined ? evalExpr(expr.offset, env) : 0;
-      const key = `__peek__${offsetVal}__${expr.bits}`;
-      return env.get(key) ?? 0;
+      return env.get(peekEnvKey(offsetVal, expr.bits)) ?? 0;
     }
+    case "lookup": {
+      // key truncated toward zero; negative or missing key → 0 (§4)
+      const k = Math.trunc(evalExpr(expr.key, env));
+      const v = expr.table[k];
+      return v ?? 0;
+    }
+    case "wireSize":
+      return env.get(wireSizeEnvKey(expr.target)) ?? 0;
+    case "prevIter":
+      return env.get(prevIterEnvKey(expr.field)) ?? 0;
+    case "remaining":
+      return env.get(remainingEnvKey()) ?? 0;
+    case "enclosingBits":
+      return env.get(enclosingBitsEnvKey()) ?? 0;
+    case "enclosingField":
+      return env.get(enclosingFieldEnvKey(expr.field)) ?? 0;
     default: {
       const _exhaustive: never = expr;
       throw new Error(
@@ -75,30 +112,70 @@ export function evalExpr(expr: Expr, env: PacketEnv): number {
   }
 }
 
+/** Evaluate, returning `fallback` when a referenced field is missing (§10.3). */
+export function evalExprOr(expr: Expr, env: PacketEnv, fallback = 0): number {
+  try {
+    return evalExpr(expr, env);
+  } catch (e) {
+    if (e instanceof MissingRefError) return fallback;
+    throw e;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Static reference collection
+ * ------------------------------------------------------------------ */
+
+/** Plain field-id references (`ref`) reachable from an expression. */
 export function exprRefs(expr: Expr): string[] {
   const out: string[] = [];
-  walkExpr(expr, out);
+  walkExpr(expr, (e) => {
+    if (e.kind === "ref") out.push(e.field);
+  });
   return out;
 }
 
-function walkExpr(expr: Expr, out: string[]): void {
+/** Visit every sub-expression node depth-first. */
+export function walkExpr(expr: Expr, visit: (e: Expr) => void): void {
+  visit(expr);
   switch (expr.kind) {
-    case "lit": return;
-    case "ref": out.push(expr.field); return;
-    case "op": walkExpr(expr.a, out); walkExpr(expr.b, out); return;
+    case "lit":
+    case "ref":
+    case "wireSize":
+    case "prevIter":
+    case "remaining":
+    case "enclosingBits":
+    case "enclosingField":
+      return;
+    case "op":
+      walkExpr(expr.a, visit);
+      walkExpr(expr.b, visit);
+      return;
     case "cond":
-      walkExpr(expr.test, out);
-      walkExpr(expr.t, out);
-      walkExpr(expr.f, out);
+      walkExpr(expr.test, visit);
+      walkExpr(expr.t, visit);
+      walkExpr(expr.f, visit);
       return;
     case "peek":
-      if (expr.offset !== undefined) walkExpr(expr.offset, out);
+      if (expr.offset !== undefined) walkExpr(expr.offset, visit);
+      return;
+    case "lookup":
+      walkExpr(expr.key, visit);
       return;
     default: {
       const _exhaustive: never = expr;
       throw new Error(
-        `exprRefs: unhandled Expr kind ${String((_exhaustive as { kind?: string }).kind)}`,
+        `walkExpr: unhandled Expr kind ${String((_exhaustive as { kind?: string }).kind)}`,
       );
     }
   }
+}
+
+/** True if any sub-expression matches the predicate. */
+export function exprContains(expr: Expr, pred: (e: Expr) => boolean): boolean {
+  let found = false;
+  walkExpr(expr, (e) => {
+    if (pred(e)) found = true;
+  });
+  return found;
 }

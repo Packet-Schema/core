@@ -19,13 +19,18 @@ export type LayoutOptions = {
   viewMode?: ViewMode;
 };
 
+function resolveRowBits(packet: PsdlPacket): number {
+  return packet.rendererHints?.rowBits ?? packet.rowBits ?? 0;
+}
+
 export function resolveLayout(
   packet: PsdlPacket,
   options: LayoutOptions = {},
 ): ResolvedLayout {
-  if (!Number.isInteger(packet.rowBits) || packet.rowBits <= 0) {
+  const rowBits = resolveRowBits(packet);
+  if (!Number.isInteger(rowBits) || rowBits <= 0) {
     throw new Error(
-      `resolveLayout: rowBits must be a positive integer; got ${String(packet.rowBits)}.`,
+      `resolveLayout: rowBits must be a positive integer; got ${String(rowBits)}.`,
     );
   }
   const env: PacketEnv = new Map(options.env ?? initialEnv(packet));
@@ -44,7 +49,7 @@ export function resolveLayout(
         ...(nf.category ? { category: nf.category } : {}),
         ...(nf.doc ? { description: nf.doc } : {}),
       };
-      bitPos = emitField(field, nf, bitPos, packet.rowBits, cells);
+      bitPos = emitField(field, nf, bitPos, rowBits, cells);
       continue;
     }
     const totalBits = g.children.reduce((a, f) => a + f.bits, 0);
@@ -82,13 +87,13 @@ export function resolveLayout(
       id: g.parentId,
       name: g.parentName,
       bits: totalBits,
-      encrypted: allEncrypted ? true : undefined,
-      encryptedParentId: sharedParentId,
-      encryptedContextNote: sharedParentId ? first.encryptedContextNote : undefined,
-      headerProtected: allHeaderProtected ? true : undefined,
-      byteOrder: sharedByteOrder,
+      ...(allEncrypted ? { encrypted: true as const } : {}),
+      ...(sharedParentId !== undefined ? { encryptedParentId: sharedParentId } : {}),
+      ...(sharedParentId ? { encryptedContextNote: first.encryptedContextNote } : {}),
+      ...(allHeaderProtected ? { headerProtected: true as const } : {}),
+      ...(sharedByteOrder !== undefined ? { byteOrder: sharedByteOrder } : {}),
     };
-    bitPos = emitField(field, proxy, bitPos, packet.rowBits, cells, g.children);
+    bitPos = emitField(field, proxy, bitPos, rowBits, cells, g.children);
   }
   return { cells, totalBits: norm.totalBits };
 }

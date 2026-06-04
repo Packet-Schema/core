@@ -1,4 +1,4 @@
-import { evalExpr, MissingRefError } from "./expr.js";
+import { evalExpr, exprContains, MissingRefError, walkExpr } from "./expr.js";
 import type { Constraint, Expr, PacketEnv } from "./types.js";
 
 export type PropagateOk = { ok: PacketEnv };
@@ -17,9 +17,7 @@ function solveFor(
   env: PacketEnv,
 ): number | null {
   if (expr.kind === "ref") return expr.field === targetRef ? known : null;
-  if (expr.kind === "lit") return null;
-  if (expr.kind === "cond") return null;
-  if (expr.kind === "peek") return null;
+  if (expr.kind !== "op") return null; // only linear op-trees are invertible
   const aHas = containsRef(expr.a, targetRef);
   const bHas = containsRef(expr.b, targetRef);
   if (aHas === bHas) return null;
@@ -39,17 +37,7 @@ function solveFor(
 }
 
 function containsRef(expr: Expr, target: string): boolean {
-  if (expr.kind === "ref") return expr.field === target;
-  if (expr.kind === "lit") return false;
-  if (expr.kind === "cond")
-    return (
-      containsRef(expr.test, target) ||
-      containsRef(expr.t, target) ||
-      containsRef(expr.f, target)
-    );
-  if (expr.kind === "peek")
-    return expr.offset !== undefined && containsRef(expr.offset, target);
-  return containsRef(expr.a, target) || containsRef(expr.b, target);
+  return exprContains(expr, (e) => e.kind === "ref" && e.field === target);
 }
 
 function evalConst(expr: Expr, env: PacketEnv): number | null {
@@ -140,24 +128,36 @@ export function propagate(
 
 function uniqueRefs(expr: Expr): string[] {
   const set = new Set<string>();
-  collectRefs(expr, set);
+  walkExpr(expr, (e) => {
+    if (e.kind === "ref") set.add(e.field);
+  });
   return [...set];
 }
 
-function collectRefs(expr: Expr, set: Set<string>): void {
-  switch (expr.kind) {
-    case "lit": return;
-    case "ref": set.add(expr.field); return;
-    case "op": collectRefs(expr.a, set); collectRefs(expr.b, set); return;
-    case "cond":
-      collectRefs(expr.test, set);
-      collectRefs(expr.t, set);
-      collectRefs(expr.f, set);
-      return;
-    case "peek":
-      if (expr.offset) collectRefs(expr.offset, set);
-      return;
+/**
+ * Fixpoint back-propagation (§9): re-run the constraint list until no new
+ * field is resolved in a pass. Seeds the pass set from every key in `env`.
+ */
+export function propagateFixpoint(
+  constraints: Constraint[],
+  env: PacketEnv,
+): PropagateResult {
+  let current: PacketEnv = new Map(env);
+  let changed = true;
+  let guard = 0;
+  const MAX_PASSES = 1000;
+  while (changed && guard++ < MAX_PASSES) {
+    changed = false;
+    for (const key of [...current.keys()]) {
+      const res = propagate(constraints, current, key);
+      if ("conflict" in res) return res;
+      // Adopt newly resolved keys.
+      for (const [k, v] of res.ok) {
+        if (current.get(k) !== v) { current = res.ok; changed = true; break; }
+      }
+    }
   }
+  return { ok: current };
 }
 
 export function validateConstraints(

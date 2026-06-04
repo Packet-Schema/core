@@ -1,63 +1,59 @@
+import { walkExpr } from "./expr.js";
+import { isField } from "./utils.js";
 import type { Container, Expr, Packet } from "./types.js";
 
 function isExpr(value: unknown): value is Expr {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    typeof (value as Record<string, unknown>).kind === "string"
-  );
+  return typeof value === "object" && value !== null && "kind" in value &&
+    typeof (value as Record<string, unknown>).kind === "string";
 }
 
 function isUntilCount(value: unknown): value is { until: Expr } {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    "until" in value &&
-    isExpr((value as Record<string, unknown>).until)
-  );
+  return typeof value === "object" && value !== null && "until" in value &&
+    isExpr((value as Record<string, unknown>).until);
 }
 
+/** All plain field-id references reachable from a packet's expressions. */
 export function collectPsdlRefs(packet: Packet): Set<string> {
   const out = new Set<string>();
   const visit = (e: Expr): void => {
-    switch (e.kind) {
-      case "lit": return;
-      case "ref": out.add(e.field); return;
-      case "op": visit(e.a); visit(e.b); return;
-      case "cond": visit(e.test); visit(e.t); visit(e.f); return;
-      case "peek": if (e.offset) visit(e.offset); return;
-    }
+    walkExpr(e, (n) => {
+      if (n.kind === "ref") out.add(n.field);
+    });
   };
   const walk = (containers: Container[]): void => {
     for (const c of containers) {
-      if (!c.kind || c.kind === "field") {
-        if (c.type?.kind === "bytes" && c.type.n) visit(c.type.n);
+      if (isField(c)) {
+        if (c.type.kind === "bytes" && c.type.n !== "auto") visit(c.type.n);
+        if (c.computedFrom) visit(c.computedFrom);
         continue;
       }
-      if (c.kind === "group" && c.children) walk(c.children);
-      if (c.kind === "switch") {
-        if (c.on) visit(c.on);
-        for (const v of Object.values(c.cases)) {
-          if (v?.fields) walk(v.fields);
-        }
-        if (c.default?.fields) walk(c.default.fields);
-      }
-      if (c.kind === "repeat") {
-        if (isExpr(c.count)) visit(c.count);
-        else if (isUntilCount(c.count)) visit(c.count.until);
-        if (c.element?.fields) walk(c.element.fields);
-      }
-      if (c.kind === "encrypted") {
-        if (c.wireBits) visit(c.wireBits);
-        if (c.plaintext?.fields) walk(c.plaintext.fields);
-      }
-      if (c.kind === "optional") {
-        if (c.when) visit(c.when);
-        if (c.field) walk([c.field]);
+      switch (c.kind) {
+        case "virtual": visit(c.expr); break;
+        case "group": walk(c.children); break;
+        case "bounded": visit(c.bytes); walk(c.fields); break;
+        case "switch":
+          visit(c.on);
+          for (const arm of Object.values(c.cases)) walk(arm.fields);
+          break;
+        case "repeat":
+          if (isExpr(c.count)) visit(c.count);
+          else if (isUntilCount(c.count)) visit(c.count.until);
+          walk(c.element.fields);
+          break;
+        case "encrypted":
+          if (c.wireBits) visit(c.wireBits);
+          walk(c.plaintext.fields);
+          break;
+        case "optional":
+          visit(c.when);
+          walk([c.container]);
+          break;
+        // align, ref: no inline field-id expressions
       }
     }
   };
   walk(packet.body);
+  if (packet.defs) for (const def of Object.values(packet.defs)) walk(def.fields);
+  for (const con of packet.constraints ?? []) { visit(con.lhs); visit(con.rhs); }
   return out;
 }

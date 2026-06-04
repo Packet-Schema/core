@@ -8,13 +8,19 @@ export type {
   PsdlExpr,
   PsdlType,
   Field,
+  Virtual,
   Repeat,
+  RepeatCount,
   Switch,
   Group,
   Encrypted,
   Optional,
+  Align,
+  Bounded,
+  RefContainer,
   Container,
   Struct,
+  NamedStruct,
   Constraint,
   Type,
   TypeInt,
@@ -23,12 +29,30 @@ export type {
   TypeEnum,
   TypeVarint,
   TypeBerLength,
+  VarintEncoding,
+  EnumVariant,
+  EnumVariantObj,
+  ChecksumAlgorithm,
+  ChecksumParams,
+  PseudoHeader,
+  DisplayHint,
+  FieldMeta,
+  PacketMeta,
+  ImportEntry,
+  RendererHints,
+  RendererSection,
   Expr,
   ExprLit,
   ExprRef,
   ExprOp,
   ExprCond,
   ExprPeek,
+  ExprLookup,
+  ExprWireSize,
+  ExprPrevIter,
+  ExprRemaining,
+  ExprEnclosingBits,
+  ExprEnclosingField,
   BinOp,
   CategoryToken,
   PacketEnv,
@@ -41,7 +65,7 @@ export type {
   SubCell,
   ResolvedLayout,
 } from "./types.js";
-export { VARINT_ENCODINGS } from "./types.js";
+export { VARINT_ENCODINGS, CHECKSUM_ALGORITHMS, CATEGORY_TOKENS, BIN_OPS } from "./types.js";
 
 // Expression helpers & evaluator
 export {
@@ -50,14 +74,28 @@ export {
   op,
   cond,
   peek,
+  lookup,
+  wireSize,
+  prevIter,
+  remaining,
+  enclosingBits,
+  enclosingField,
   peekEnvKey,
+  remainingEnvKey,
+  enclosingBitsEnvKey,
+  wireSizeEnvKey,
+  prevIterEnvKey,
+  enclosingFieldEnvKey,
   evalExpr,
+  evalExprOr,
   exprRefs,
+  walkExpr,
+  exprContains,
   MissingRefError,
 } from "./expr.js";
 
 // Normalize
-export { normalize, initialEnv, typeBits, berLenEnvKey } from "./normalize.js";
+export { normalize, initialEnv, typeBits, berLenEnvKey, selectArm } from "./normalize.js";
 export type { NormalizeOptions } from "./normalize.js";
 
 // Layout
@@ -65,7 +103,7 @@ export { resolveLayout } from "./layout.js";
 export type { LayoutOptions } from "./layout.js";
 
 // Constraint solver
-export { propagate, validateConstraints } from "./constraint.js";
+export { propagate, propagateFixpoint, validateConstraints } from "./constraint.js";
 export type { PropagateResult, PropagateOk, PropagateConflict } from "./constraint.js";
 
 // Validation

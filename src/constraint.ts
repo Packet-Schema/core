@@ -1,14 +1,9 @@
-import { evalExpr, MissingRefError } from "./expr.js";
+import { evalExpr, exprContains, MissingRefError, walkExpr } from "./expr.js";
 import type { Constraint, Expr, PacketEnv } from "./types.js";
 
 export type PropagateOk = { ok: PacketEnv };
 export type PropagateConflict = { conflict: string };
 export type PropagateResult = PropagateOk | PropagateConflict;
-
-function singleRef(expr: Expr): string | null {
-  if (expr.kind === "ref") return expr.field;
-  return null;
-}
 
 function solveFor(
   expr: Expr,
@@ -17,9 +12,7 @@ function solveFor(
   env: PacketEnv,
 ): number | null {
   if (expr.kind === "ref") return expr.field === targetRef ? known : null;
-  if (expr.kind === "lit") return null;
-  if (expr.kind === "cond") return null;
-  if (expr.kind === "peek") return null;
+  if (expr.kind !== "op") return null; // only linear op-trees are invertible
   const aHas = containsRef(expr.a, targetRef);
   const bHas = containsRef(expr.b, targetRef);
   if (aHas === bHas) return null;
@@ -39,17 +32,7 @@ function solveFor(
 }
 
 function containsRef(expr: Expr, target: string): boolean {
-  if (expr.kind === "ref") return expr.field === target;
-  if (expr.kind === "lit") return false;
-  if (expr.kind === "cond")
-    return (
-      containsRef(expr.test, target) ||
-      containsRef(expr.t, target) ||
-      containsRef(expr.f, target)
-    );
-  if (expr.kind === "peek")
-    return expr.offset !== undefined && containsRef(expr.offset, target);
-  return containsRef(expr.a, target) || containsRef(expr.b, target);
+  return exprContains(expr, (e) => e.kind === "ref" && e.field === target);
 }
 
 function evalConst(expr: Expr, env: PacketEnv): number | null {
@@ -61,6 +44,11 @@ function evalConst(expr: Expr, env: PacketEnv): number | null {
   }
 }
 
+// Invert `a OP known = result` for `a` (the unknown on the LEFT operand).
+// Shifts use the semantics of expr.ts (`<<` → `(a<<b)>>>0` unsigned, `>>` →
+// arithmetic `a>>b`, §4). They are lossy and not uniquely invertible, so the
+// candidate produced here is verified by re-evaluation in applyKnownSide
+// before adoption.
 function invertLeft(o: string, result: number, known: number): number | null {
   switch (o) {
     case "+": return result - known;
@@ -68,12 +56,13 @@ function invertLeft(o: string, result: number, known: number): number | null {
     case "*": return known === 0 ? null : Math.trunc(result / known);
     case "/": return result * known;
     case "%": return null;
-    case "<<": return result >> known;
-    case ">>": return (result << known) | 0;
+    case "<<": return result >>> known;        // inverse of (a << known)>>>0
+    case ">>": return (result << known) | 0;    // inverse of arithmetic a >> known
   }
   return null;
 }
 
+// Invert `known OP b = result` for `b` (the unknown on the RIGHT operand).
 function invertRight(o: string, result: number, known: number): number | null {
   switch (o) {
     case "+": return result - known;
@@ -81,8 +70,46 @@ function invertRight(o: string, result: number, known: number): number | null {
     case "*": return known === 0 ? null : Math.trunc(result / known);
     case "/": return result === 0 ? null : Math.trunc(known / result);
     case "%": return null;
+    // Shift amount as the unknown is not soundly invertible.
     case "<<": return null;
     case ">>": return null;
+  }
+  return null;
+}
+
+/** Refs in `expr` whose value is not yet known in `env`. */
+function unknownRefs(expr: Expr, env: PacketEnv): string[] {
+  return uniqueRefs(expr).filter((r) => !env.has(r));
+}
+
+/**
+ * Given that `known` is the value of one side of an equality, try to use it to
+ * resolve the other (`other`) side: solve its single unknown, or detect a
+ * conflict when it is fully determined and disagrees.
+ */
+function applyKnownSide(
+  known: number,
+  other: Expr,
+  next: PacketEnv,
+): PropagateConflict | null {
+  const unknowns = unknownRefs(other, next);
+  if (unknowns.length === 0) {
+    const otherVal = evalConst(other, next);
+    if (otherVal !== null && otherVal !== known)
+      return { conflict: `Constraint failed: ${known} ≠ ${otherVal}` };
+    return null;
+  }
+  if (unknowns.length === 1) {
+    const solved = solveFor(other, unknowns[0]!, known, next);
+    if (solved !== null) {
+      // Inversion through lossy operators (shifts, truncating division) is not
+      // guaranteed to round-trip under the unsigned evaluator. Adopt the solved
+      // value only if re-evaluating `other` actually reproduces `known`.
+      const probe: PacketEnv = new Map(next);
+      probe.set(unknowns[0]!, solved);
+      const check = evalConst(other, probe);
+      if (check === known) next.set(unknowns[0]!, solved);
+    }
   }
   return null;
 }
@@ -94,45 +121,19 @@ export function propagate(
 ): PropagateResult {
   const next: PacketEnv = new Map(env);
   for (const c of constraints) {
-    const lhsRef = singleRef(c.lhs);
-    const rhsRef = singleRef(c.rhs);
-    const lhsHas = containsRef(c.lhs, changedKey);
-    const rhsHas = containsRef(c.rhs, changedKey);
-    if (!lhsHas && !rhsHas) continue;
-    if (lhsHas) {
-      const lhsVal = evalConst(c.lhs, next);
-      if (lhsVal === null) continue;
-      if (rhsRef) {
-        next.set(rhsRef, lhsVal);
-      } else {
-        const targets = uniqueRefs(c.rhs);
-        if (targets.length === 1) {
-          const solved = solveFor(c.rhs, targets[0]!, lhsVal, next);
-          if (solved !== null) next.set(targets[0]!, solved);
-        } else {
-          const rhsVal = evalConst(c.rhs, next);
-          if (rhsVal !== null && rhsVal !== lhsVal)
-            return { conflict: `Constraint failed: lhs=${lhsVal} rhs=${rhsVal}` };
-        }
-      }
+    if (!containsRef(c.lhs, changedKey) && !containsRef(c.rhs, changedKey)) continue;
+    const lhsVal = evalConst(c.lhs, next);
+    const rhsVal = evalConst(c.rhs, next);
+    if (lhsVal !== null && rhsVal !== null) {
+      if (lhsVal !== rhsVal) return { conflict: `Constraint failed: lhs=${lhsVal} rhs=${rhsVal}` };
       continue;
     }
-    if (rhsHas) {
-      const rhsVal = evalConst(c.rhs, next);
-      if (rhsVal === null) continue;
-      if (lhsRef) {
-        next.set(lhsRef, rhsVal);
-      } else {
-        const targets = uniqueRefs(c.lhs);
-        if (targets.length === 1) {
-          const solved = solveFor(c.lhs, targets[0]!, rhsVal, next);
-          if (solved !== null) next.set(targets[0]!, solved);
-        } else {
-          const lhsVal = evalConst(c.lhs, next);
-          if (lhsVal !== null && lhsVal !== rhsVal)
-            return { conflict: `Constraint failed: lhs=${lhsVal} rhs=${rhsVal}` };
-        }
-      }
+    if (lhsVal !== null) {
+      const conflict = applyKnownSide(lhsVal, c.rhs, next);
+      if (conflict) return conflict;
+    } else if (rhsVal !== null) {
+      const conflict = applyKnownSide(rhsVal, c.lhs, next);
+      if (conflict) return conflict;
     }
   }
   return { ok: next };
@@ -140,24 +141,36 @@ export function propagate(
 
 function uniqueRefs(expr: Expr): string[] {
   const set = new Set<string>();
-  collectRefs(expr, set);
+  walkExpr(expr, (e) => {
+    if (e.kind === "ref") set.add(e.field);
+  });
   return [...set];
 }
 
-function collectRefs(expr: Expr, set: Set<string>): void {
-  switch (expr.kind) {
-    case "lit": return;
-    case "ref": set.add(expr.field); return;
-    case "op": collectRefs(expr.a, set); collectRefs(expr.b, set); return;
-    case "cond":
-      collectRefs(expr.test, set);
-      collectRefs(expr.t, set);
-      collectRefs(expr.f, set);
-      return;
-    case "peek":
-      if (expr.offset) collectRefs(expr.offset, set);
-      return;
+/**
+ * Fixpoint back-propagation (§9): re-run the constraint list until no new
+ * field is resolved in a pass. Seeds the pass set from every key in `env`.
+ */
+export function propagateFixpoint(
+  constraints: Constraint[],
+  env: PacketEnv,
+): PropagateResult {
+  let current: PacketEnv = new Map(env);
+  let changed = true;
+  let guard = 0;
+  const MAX_PASSES = 1000;
+  while (changed && guard++ < MAX_PASSES) {
+    changed = false;
+    for (const key of [...current.keys()]) {
+      const res = propagate(constraints, current, key);
+      if ("conflict" in res) return res;
+      // Adopt newly resolved keys.
+      for (const [k, v] of res.ok) {
+        if (current.get(k) !== v) { current = res.ok; changed = true; break; }
+      }
+    }
   }
+  return { ok: current };
 }
 
 export function validateConstraints(

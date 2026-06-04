@@ -1,0 +1,1018 @@
+$schema: https://json-schema.org/draft/2020-12/schema
+$id: https://packet-schema.dev/schemas/psdl-0.5.yaml
+title: PSDL 0.5
+description: |-
+  Packet Schema Definition Language 0.5 — canonical YAML schema for a single
+  packet definition file. The top-level document IS the Packet object.
+
+  Authoring shorthands (bare integer → ExprLit, bare field-id string →
+  ExprRef) are normalized to full object form by the parser before
+  JSON Schema validation. The schema validates the normalized form only.
+
+# ──────────────────────────────────────────────────────────────────────
+# Packet (top-level)
+# ──────────────────────────────────────────────────────────────────────
+type: object
+required: [name, body]
+unevaluatedProperties: false
+$comment: |-
+  Some PSDL rules are intentionally validator-layer-only and cannot be encoded
+  in JSON Schema: imported-name visibility (§1.3), §11.4 lint warnings
+  (version-absent, recursive-def constraint skip, checksumParams on a named
+  CRC), and the placement restriction forbidding `virtual` fields inside
+  defs/NamedStruct bodies (§11.1). See the ImportEntry note for the import
+  examples.
+properties:
+  version:
+    type: string
+    pattern: '^\d+\.\d+$'
+    description: |-
+      PSDL version string (e.g. "0.5"). Strongly recommended.
+      See §15 for version compatibility rules.
+  name:
+    type: string
+    minLength: 1
+    description: Unique packet identifier (globally unique within a packet set).
+  abbrev:
+    type: string
+    description: |-
+      Protocol filter name used by codegen (e.g. Wireshark).
+      Defaults to `name` if absent.
+  rowBits:
+    type: integer
+    minimum: 1
+    description: "Deprecated: use rendererHints.rowBits. Accepted for pre-0.5 compatibility."
+  body:
+    type: array
+    items:
+      $ref: '#/$defs/Container'
+  constraints:
+    type: array
+    items:
+      $ref: '#/$defs/Constraint'
+  byteOrder:
+    type: string
+    enum: [BE, LE]
+    description: Default byte order for all multi-byte integer fields.
+  description:
+    type: string
+  rendererHints:
+    $ref: '#/$defs/RendererHints'
+  meta:
+    $ref: '#/$defs/PacketMeta'
+  defs:
+    type: object
+    description: Named Struct definitions available for reuse via `ref` containers.
+    additionalProperties:
+      $ref: '#/$defs/NamedStruct'
+  imports:
+    type: array
+    description: |-
+      Cross-file def imports. Makes defs from other PSDL files available
+      under a namespace prefix. See §1.2.
+    items:
+      $ref: '#/$defs/ImportEntry'
+
+$defs:
+
+  # ────────────────────────────────────────────────────────────────────
+  # Cross-file imports
+  # ────────────────────────────────────────────────────────────────────
+  ImportEntry:
+    type: object
+    required: [source, as]
+    additionalProperties: false
+    description: |-
+      Imports defs from another PSDL file under a local namespace prefix.
+      NOTE: JSON Schema cannot enforce the following constraints; they MUST be
+      enforced by the validator layer:
+        - All `as` values in the imports array must be unique (duplicate as
+          prefix is a validation error per §1.2 and §11.1).
+        - Circular import chains (A imports B imports A) are a validation error.
+      See §1.2 for the full import rules.
+    properties:
+      source:
+        type: string
+        minLength: 1
+        description: |-
+          Opaque path / package reference. Resolution is tool-layer concern
+          (filesystem path, npm package, URL).
+      as:
+        type: string
+        pattern: '^[a-zA-Z][a-zA-Z0-9_]*$'
+        description: |-
+          Namespace prefix used to reference imported defs.
+          Must match [a-zA-Z][a-zA-Z0-9_]* (see §1.2).
+
+  # ────────────────────────────────────────────────────────────────────
+  # Packet metadata
+  # ────────────────────────────────────────────────────────────────────
+  PacketMeta:
+    type: object
+    additionalProperties: false
+    description: RFC and alias metadata for tooling (codegen, Chrome extension, LSP).
+    properties:
+      rfc:
+        type: integer
+        description: RFC number.
+      section:
+        type: string
+        description: RFC section reference (e.g. "3.1").
+      aliases:
+        type: array
+        items: { type: string }
+        description: Alternative names for this packet type.
+
+  # ────────────────────────────────────────────────────────────────────
+  # Per-field / per-group RFC metadata
+  # ────────────────────────────────────────────────────────────────────
+  FieldMeta:
+    type: object
+    additionalProperties: false
+    description: Per-field or per-group RFC annotation used by Chrome extension and LSP.
+    properties:
+      rfc:
+        type: integer
+        description: RFC number this field is defined in.
+      section:
+        type: string
+        description: RFC section reference for this specific field.
+
+  # ────────────────────────────────────────────────────────────────────
+  # Renderer hints
+  # ────────────────────────────────────────────────────────────────────
+  RendererHints:
+    type: object
+    additionalProperties: false
+    description: |-
+      Display-only metadata. A packet without rowBits is a valid PSDL
+      document; renderers should fall back to 32 if absent.
+    properties:
+      rowBits:
+        type: integer
+        minimum: 1
+        description: Number of bits per row in the wire diagram.
+      sections:
+        type: array
+        description: |-
+          Visual section labels for the wire diagram. Display-only;
+          no effect on wire layout or expression scoping.
+        items:
+          $ref: '#/$defs/RendererSection'
+
+  RendererSection:
+    type: object
+    required: [id, label, fields]
+    additionalProperties: false
+    description: A labelled visual region in the wire diagram renderer.
+    properties:
+      id:
+        type: string
+        minLength: 1
+        description: Unique identifier for this section.
+      label:
+        type: string
+        minLength: 1
+        description: Human-readable section header.
+      fields:
+        type: array
+        items: { type: string }
+        description: |-
+          Ordered list of field ids or group ids belonging to this section.
+
+  # ────────────────────────────────────────────────────────────────────
+  # Checksum algorithm parameters
+  # ────────────────────────────────────────────────────────────────────
+  ChecksumParams:
+    type: object
+    additionalProperties: false
+    description: |-
+      CRC algorithm parameters for codegen. Allows full specification of
+      arbitrary CRC variants without a custom algorithm name string.
+    properties:
+      polynomial:
+        type: integer
+        minimum: 0
+        description: |-
+          Generator polynomial (normal / non-reflected form). No upper bound
+          is imposed to allow CRC-64 variants (e.g. NVMe CRC-64/ECMA-182,
+          polynomial 0xAD93D23594C935A9).
+      initValue:
+        type: integer
+        minimum: 0
+        description: |-
+          Initial CRC register value. No upper bound is imposed to allow
+          CRC-64 variants.
+      finalXOR:
+        type: integer
+        minimum: 0
+        description: |-
+          Value XORed with the final CRC result. No upper bound is imposed
+          to allow CRC-64 variants.
+      inputReflect:
+        type: boolean
+        description: Reflect each input byte before processing.
+      outputReflect:
+        type: boolean
+        description: Reflect the final CRC before applying finalXOR.
+
+  # ────────────────────────────────────────────────────────────────────
+  # Expressions
+  # ────────────────────────────────────────────────────────────────────
+  Expr:
+    description: |-
+      Pure, serialisable arithmetic / comparison expression.
+      Authoring shorthands:
+        bare integer N  → { kind: lit, value: N }
+        bare string "f" → { kind: ref, field: "f" }  (if matches field-id pattern)
+      These are normalized to full objects before schema validation.
+    oneOf:
+      - $ref: '#/$defs/ExprLit'
+      - $ref: '#/$defs/ExprRef'
+      - $ref: '#/$defs/ExprOp'
+      - $ref: '#/$defs/ExprCond'
+      - $ref: '#/$defs/ExprPeek'
+      - $ref: '#/$defs/ExprLookup'
+      - $ref: '#/$defs/ExprWireSize'
+      - $ref: '#/$defs/ExprPrevIter'
+      - $ref: '#/$defs/ExprRemaining'
+      - $ref: '#/$defs/ExprEnclosingBits'
+      - $ref: '#/$defs/ExprEnclosingField'
+
+  ExprLit:
+    type: object
+    required: [kind, value]
+    additionalProperties: false
+    properties:
+      kind:  { const: lit }
+      value: { type: integer }
+
+  ExprRef:
+    type: object
+    required: [kind, field]
+    additionalProperties: false
+    description: |-
+      Value of a named field by id. If field is a repeat container's id (not a
+      leaf field), the expression evaluates to that repeat's completed iteration
+      count (the env[repeat.id] value mandated by §10.7 for both eos and
+      fixed-count repeats), not bytes; for the wire-byte footprint use wireSize.
+      See §4.
+    properties:
+      kind:  { const: ref }
+      field: { type: string, minLength: 1 }
+
+  ExprOp:
+    type: object
+    required: [kind, op, a, b]
+    additionalProperties: false
+    properties:
+      kind: { const: op }
+      op:
+        type: string
+        enum:
+          - "+"   # addition
+          - "-"   # subtraction
+          - "*"   # multiplication
+          - "/"   # integer division (truncated toward zero)
+          - "%"   # remainder
+          - "<<"  # left shift (32-bit)
+          - ">>"  # arithmetic right shift (32-bit)
+          - "=="  # equal          → 0 or 1
+          - "!="  # not equal      → 0 or 1
+          - "<"   # less than      → 0 or 1
+          - "<="  # less or equal  → 0 or 1
+          - ">"   # greater than   → 0 or 1
+          - ">="  # greater/equal  → 0 or 1
+          - "&"   # bitwise AND (32-bit)
+          - "|"   # bitwise OR  (32-bit)
+          - "^"   # bitwise XOR (32-bit)
+      a: { $ref: '#/$defs/Expr' }
+      b: { $ref: '#/$defs/Expr' }
+
+  ExprCond:
+    type: object
+    required: [kind, test, t, f]
+    additionalProperties: false
+    description: Ternary — evaluates t if test ≠ 0, otherwise f.
+    properties:
+      kind: { const: cond }
+      test: { $ref: '#/$defs/Expr' }
+      t:    { $ref: '#/$defs/Expr' }
+      f:    { $ref: '#/$defs/Expr' }
+
+  ExprPeek:
+    type: object
+    required: [kind, bits]
+    additionalProperties: false
+    description: |-
+      Read-ahead in the bit stream without consuming. Valid only in
+      switch.on, optional.when, and repeat.count (including until).
+      See §10.6 for parse-position semantics per context.
+    properties:
+      kind: { const: peek }
+      bits:
+        type: integer
+        minimum: 1
+        maximum: 64
+      offset: { $ref: '#/$defs/Expr' }
+
+  ExprLookup:
+    type: object
+    required: [kind, key, table]
+    additionalProperties: false
+    description: |-
+      Discrete table lookup. Maps an integer key to an integer value.
+      If the key is absent from the table, the result is 0.
+      Useful for non-linear encodings such as CAN FD DLC-to-byte-count.
+    properties:
+      kind:  { const: lookup }
+      key:   { $ref: '#/$defs/Expr' }
+      table:
+        type: object
+        description: |-
+          Map from non-negative decimal integer key (as string) to integer
+          result value. Keys must match ^(0|[1-9][0-9]*)$ — negative keys,
+          hex literals, and non-numeric keys are a validation error (§4, §11.1).
+        propertyNames:
+          type: string
+          pattern: '^(0|[1-9][0-9]*)$'
+        additionalProperties: { type: integer }
+
+  ExprWireSize:
+    type: object
+    required: [kind, target]
+    additionalProperties: false
+    description: |-
+      Total bytes consumed on the wire by a named container or field
+      (`target`), including all recursively nested content for containers.
+      For a leaf field this is the field's wire footprint (bits/8 for
+      fixed-width types; the encoded size for varint/berLength). May appear in
+      constraints, in a Field.computedFrom hint, and in body expressions when
+      the target precedes the expression in document order (same
+      forward-reference rule as ref). Absent target yields 0. In
+      constraints/computedFrom it is evaluated bottom-up after recursive
+      encoding for length back-propagation (§4).
+    properties:
+      kind:   { const: wireSize }
+      target:
+        type: string
+        minLength: 1
+        description: Id of the named container or field whose wire byte size is returned.
+
+  ExprPrevIter:
+    type: object
+    required: [kind, field]
+    additionalProperties: false
+    description: |-
+      Value of a named field from the most recently completed iteration of the
+      immediately enclosing repeat. Valid only inside repeat.count.until
+      (§4, §10.4). On the first iteration yields the field's seeded value
+      (§10.2) or 0.
+    properties:
+      kind:  { const: prevIter }
+      field:
+        type: string
+        minLength: 1
+        description: Id of the field whose previous-iteration value is returned.
+
+  ExprRemaining:
+    type: object
+    required: [kind]
+    additionalProperties: false
+    description: |-
+      Bytes remaining in the immediately enclosing scope-providing container
+      (bounded scope, encrypted.plaintext, or top-level body) at the point of
+      evaluation: (scope byte budget) − (bytes already consumed). Replaces the
+      former per-scope byte-budget primitives (see §4).
+      Valid in bytes.n and other body expressions
+      (including inside cond) — last-data-consuming position, mid-scope, or in
+      a cond. For end-anchored fields, size the preceding data field
+      remaining - <constByteCount> and place the fixed-width end fields after
+      it (§5). Using it outside a scope-providing container is a validation
+      error (§4). Used inside an encrypted.plaintext whose encrypted container
+      omits wireBits, the plaintext budget is undefined and remaining there is
+      a validation error (§5 Encrypted, §11.1).
+    properties:
+      kind: { const: remaining }
+
+  ExprEnclosingBits:
+    type: object
+    required: [kind]
+    additionalProperties: false
+    description: |-
+      Absolute bit budget of the nearest scope-providing container that carries
+      one: inside an encrypted.plaintext it equals the enclosing encrypted
+      container's wireBits expression (evaluated during parse, subject to the
+      normal forward-reference rule); at the top-level body it is the externally
+      decoder-injected total packet bit count (a constant available before
+      parsing, exempt from forward-reference). (A bounded scope's budget is
+      authored in bytes, so it does not provide enclosingBits.) Bit-precision
+      counterpart of `remaining`; merges the former per-scope bit-budget
+      primitives into one form (see §4). Authors write
+      enclosingBits / 8 for a byte boundary. Using it outside an encrypted.plaintext struct or the top-level
+      body is a validation error; at the top-level body it requires the decoder
+      to inject the total packet size (otherwise a runtime error); inside an
+      encrypted.plaintext whose encrypted container omits wireBits the budget is
+      undefined (validation error, §11.1). §4, §10.1.
+    properties:
+      kind: { const: enclosingBits }
+
+  ExprEnclosingField:
+    type: object
+    required: [kind, field]
+    additionalProperties: false
+    description: |-
+      Value of a named field from the immediately enclosing protocol layer's
+      parsed state (cross-layer access, §7). Valid in constraints only; using
+      it in a body expression is a validation error. If no enclosing layer is
+      present the expression yields 0 (same as an absent-field reference).
+    properties:
+      kind:  { const: enclosingField }
+      field:
+        type: string
+        minLength: 1
+        description: Id of the field in the enclosing layer's PSDL document.
+
+  # ────────────────────────────────────────────────────────────────────
+  # Wire types
+  # ────────────────────────────────────────────────────────────────────
+  Type:
+    oneOf:
+      - $ref: '#/$defs/TypeInt'
+      - $ref: '#/$defs/TypeBits'
+      - $ref: '#/$defs/TypeBytes'
+      - $ref: '#/$defs/TypeEnum'
+      - $ref: '#/$defs/TypeVarint'
+      - $ref: '#/$defs/TypeBerLength'
+
+  TypeInt:
+    type: object
+    required: [kind, bits]
+    additionalProperties: false
+    description: Fixed-width integer.
+    properties:
+      kind:   { const: int }
+      bits:   { type: integer, minimum: 1 }
+      signed: { type: boolean }
+
+  TypeBits:
+    type: object
+    required: [kind, n]
+    additionalProperties: false
+    description: |-
+      Raw bit field (no numeric semantics). A bits field that is a whole number
+      of bytes wide (n a multiple of 8, > 8) and begins on a byte boundary
+      follows the packet-level byteOrder for its multi-byte read; any other
+      width, or a field beginning/ending mid-byte, is a raw MSB-first bit run
+      with no byte-order swap (§12).
+    properties:
+      kind: { const: bits }
+      n:    { type: integer, minimum: 1 }
+
+  TypeBytes:
+    type: object
+    required: [kind, n]
+    additionalProperties: false
+    description: |-
+      Variable-length byte array; length given by expression (in bytes).
+      To consume all remaining bytes of the enclosing scope-providing
+      container use n: { kind: remaining } (§4). For end-anchored fields, size
+      this field n: remaining - <constByteCount> and place the fixed-width end
+      fields after it (§5).
+    properties:
+      kind: { const: bytes }
+      n:
+        $ref: '#/$defs/Expr'
+
+  EnumVariant:
+    description: |-
+      Enum variant label. Either a plain string or an object with doc.
+    oneOf:
+      - type: string
+      - type: object
+        required: [label]
+        additionalProperties: false
+        properties:
+          label: { type: string }
+          doc:   { type: string }
+
+  TypeEnum:
+    type: object
+    required: [kind, bits, variants]
+    additionalProperties: false
+    description: Named enumeration; keys are numeric values.
+    properties:
+      kind:     { const: enum }
+      bits:     { type: integer, minimum: 1 }
+      variants:
+        type: object
+        additionalProperties:
+          $ref: '#/$defs/EnumVariant'
+
+  TypeVarint:
+    type: object
+    required: [kind, encoding]
+    additionalProperties: false
+    description: |-
+      Variable-length integer. `encoding` names the scheme; predefined values
+      are quic, protobuf, cbor, ea-terminated, leb128. Arbitrary strings are
+      accepted for custom encodings (codec is responsible for implementing them).
+    properties:
+      kind:     { const: varint }
+      encoding:
+        type: string
+        minLength: 1
+        $comment: |-
+          Predefined well-known values: quic, protobuf, cbor, ea-terminated,
+          leb128. Arbitrary strings are accepted for custom encodings. Linting
+          tools SHOULD warn when the value is non-empty but does not match any
+          of the five predefined values (likely a typo, e.g. "quite" for "quic").
+
+  TypeBerLength:
+    type: object
+    required: [kind]
+    additionalProperties: false
+    description: |-
+      BER-encoded length field (1–N bytes, self-describing). maxBytes caps the
+      maximum encoded length (1–5, default 5). Declaring maxBytes > 5 is a
+      validation error. Receiving a wire-encoded length exceeding maxBytes is
+      a runtime error.
+    properties:
+      kind:     { const: berLength }
+      maxBytes:
+        type: integer
+        minimum: 1
+        maximum: 5
+        description: Maximum allowed BER encoded length in bytes (default 5).
+
+  # ────────────────────────────────────────────────────────────────────
+  # Category tokens
+  # ────────────────────────────────────────────────────────────────────
+  CategoryToken:
+    type: string
+    enum:
+      - addressing      # source / destination address
+      - identifier      # version, type, protocol number
+      - length          # length / size field
+      - type            # type / kind discriminator
+      - flags           # boolean flag bits
+      - reserved        # must-be-zero / future use
+      - checksum        # integrity check value
+      - variable        # payload or generic variable data
+      - payload-marker  # marks the start of upper-layer payload
+
+  # ────────────────────────────────────────────────────────────────────
+  # Container hierarchy
+  # ────────────────────────────────────────────────────────────────────
+  Container:
+    description: |-
+      Any node that can appear in a packet body, def body, group, repeat
+      element, switch arm, bounded scope, or encrypted.plaintext field list.
+      A single uniform container union applies in every position (the former
+      Container/ContainerNoTrailer split existed only to gate trailer
+      placement, which has been removed in favour of ordinary end-anchored
+      fields, §5). Member order follows the §5 narrative.
+      Discriminated by `kind`; Field may omit `kind` (defaults to "field").
+    oneOf:
+      - $ref: '#/$defs/Field'
+      - $ref: '#/$defs/Virtual'
+      - $ref: '#/$defs/Group'
+      - $ref: '#/$defs/Optional'
+      - $ref: '#/$defs/Repeat'
+      - $ref: '#/$defs/Switch'
+      - $ref: '#/$defs/AlignContainer'
+      - $ref: '#/$defs/BoundedContainer'
+      - $ref: '#/$defs/Encrypted'
+      - $ref: '#/$defs/RefContainer'
+
+  Field:
+    type: object
+    required: [id, name, type]
+    additionalProperties: false
+    description: |-
+      A single wire field. `kind` may be omitted (defaults to "field").
+      Field `id` must match [a-zA-Z][a-zA-Z0-9_-]* and must not contain ".".
+    properties:
+      kind:
+        type: string
+        enum: [field]
+      id:
+        type: string
+        pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$'
+        description: |-
+          Stable identifier used in expressions and cross-references.
+          Must not contain "." (reserved as the ref-expansion separator).
+      name:
+        type: string
+        description: Human-readable label.
+      type:
+        $ref: '#/$defs/Type'
+      doc:
+        type: string
+      meta:
+        $ref: '#/$defs/FieldMeta'
+      category:
+        $ref: '#/$defs/CategoryToken'
+      defaultValue:
+        type: integer
+        description: |-
+          Seed value injected into the env before parsing. Honoured for
+          fields inside defs as well as top-level fields. If const is also
+          set, const takes priority for env seeding.
+      byteOrder:
+        type: string
+        enum: [BE, LE]
+        description: |-
+          Per-field byte order override. Only affects int and enum types.
+      next:
+        type: object
+        description: |-
+          Protocol-linking map: field value → next-layer packet name.
+          Values SHOULD match the `name` or `meta.aliases` of the target
+          packet. The special key "_" is the catch-all default.
+        additionalProperties:
+          type: string
+      checksumAlgorithm:
+        type: string
+        description: |-
+          Algorithm for computing this checksum. Well-known values:
+          internet, crc32, crc32c, crc16, adler32. Arbitrary strings
+          accepted for custom algorithms (codec is responsible). A field
+          carrying checksumAlgorithm is computed and filled by the codec on
+          serialize after the covered fields are encoded (the authored/wire
+          value is ignored for output), analogous to the computedFrom contract
+          for length fields (§8, §4).
+      checksumCovers:
+        type: array
+        description: |-
+          Ordered list of field ids fed into the checksum computation.
+          Supports dotted paths (e.g. "src.oct0"), ref-container ids
+          (e.g. "src" → expands to all leaf fields of that ref in order), and
+          repeat-container ids (e.g. "chunks" → expands to the concatenated
+          wire bytes of every iteration in parse order, including any inner
+          align padding consumed within each iteration). When a checksum field
+          appears inside a repeat element, ids in its checksumCovers resolve
+          within the current iteration's scope (the repeat-indexed "#N"
+          instance), exactly as ref does (§10.4) — enabling per-block CRCs
+          (e.g. DNP3). See §8.
+        items:
+          type: string
+      checksumPseudoHeader:
+        type: string
+        enum: [ipv4, ipv6]
+        description: |-
+          Well-known pseudo-header prepended before checksumCovers when
+          computing the checksum. Used for TCP/UDP over IP.
+      checksumParams:
+        $ref: '#/$defs/ChecksumParams'
+      const:
+        type: integer
+        description: |-
+          Fixed value this field must carry. A mismatch is a runtime error.
+          Takes priority over defaultValue for env seeding; seeds the env
+          even when defaultValue is absent.
+      display:
+        type: string
+        enum: [dec, hex, oct, bin, ascii, utf8, addr]
+        description: |-
+          Display hint for renderers and Wireshark codegen. For numeric fields
+          a base (dec/hex/oct/bin, default dec); for bytes fields a rendering
+          (ascii/utf8/addr, default hex). No effect on wire encoding (§14).
+      computedFrom:
+        $ref: '#/$defs/ExprWireSize'
+        description: |-
+          Serializer hint only (does not affect parsing). Must be a wireSize
+          expression; instructs the codec to compute and fill this length
+          field bottom-up after recursive encoding is complete (§4, §6).
+          Using any other expression is a validation error.
+
+  Virtual:
+    type: object
+    required: [kind, id, expr]
+    additionalProperties: false
+    description: |-
+      Computed auxiliary field that consumes zero wire bytes. Its expr is
+      evaluated at parse time using the same forward-reference rules as body
+      expressions; its id is added to the env for subsequent expressions,
+      constraints, and checksumCovers (§5 Virtual field). Forbidden inside
+      defs/NamedStruct bodies (§11.1) — that placement restriction is enforced
+      by the validator layer, not this schema.
+    properties:
+      kind: { const: virtual }
+      id:
+        type: string
+        pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$'
+        description: Identifier added to the env and usable in subsequent expressions.
+      expr: { $ref: '#/$defs/Expr' }
+      name: { type: string }
+      doc:  { type: string }
+
+  Optional:
+    type: object
+    required: [kind, when, container]
+    additionalProperties: false
+    description: |-
+      Conditionally includes a container. `when` evaluated as boolean
+      (0 = absent, non-zero = present). Nesting Optional inside Optional
+      is allowed; inner `when` is evaluated only if the outer is present
+      (short-circuit semantics). See §10.8.
+    properties:
+      kind:      { const: optional }
+      id:
+        type: string
+        description: |-
+          Optional identifier for the optional container. Used by §13
+          rendererHints.sections and wireSize (§4). Note wireSize on an
+          absent optional's inner field yields 0; target the inner field id,
+          not the optional container id.
+      when:      { $ref: '#/$defs/Expr' }
+      container: { $ref: '#/$defs/Container' }
+      doc:
+        type: string
+        description: Description for LSP hover documentation.
+      meta:
+        $ref: '#/$defs/FieldMeta'
+        description: |-
+          Per-region RFC annotation { rfc?, section? } enabling LSP hover and
+          per-region RFC deep-linking for this optional container (§5).
+
+  Struct:
+    type: object
+    required: [id, fields]
+    additionalProperties: false
+    description: |-
+      Named list of containers; used in Repeat.element, Switch.cases arms,
+      and Encrypted.plaintext. Does not carry the recursive property — only
+      NamedStruct (used exclusively in defs) may be recursive.
+    properties:
+      id:
+        type: string
+        minLength: 1
+      doc:
+        type: string
+        description: Description for LSP hover and tooling documentation.
+      meta:
+        $ref: '#/$defs/FieldMeta'
+        description: |-
+          Per-region RFC annotation { rfc?, section? } for the inline struct
+          used as a Switch arm or Repeat element, enabling LSP hover and
+          per-region RFC deep-linking (§5).
+      fields:
+        type: array
+        items:
+          $ref: '#/$defs/Container'
+
+  NamedStruct:
+    type: object
+    required: [id, fields]
+    additionalProperties: false
+    description: |-
+      Struct type used exclusively as defs map values. Extends Struct with
+      the recursive property, which is meaningless (and therefore forbidden)
+      on anonymous inline structs used in Repeat.element, Switch.cases, or
+      Encrypted.plaintext.
+    properties:
+      id:
+        type: string
+        minLength: 1
+      doc:
+        type: string
+        description: Description for LSP hover and tooling documentation.
+      recursive:
+        type: boolean
+        description: |-
+          When true, this struct may contain ref containers pointing to
+          itself (direct) or to other recursive: true structs (indirect).
+          The decoder is responsible for depth limiting. Disables the
+          circular-reference validation check for this struct.
+      fields:
+        type: array
+        items:
+          $ref: '#/$defs/Container'
+
+  Group:
+    type: object
+    required: [kind, id, name, children]
+    additionalProperties: false
+    description: |-
+      Logical grouping of adjacent fields. Groups collapse to a single row
+      in the wire diagram and expose sub-field detail on hover.
+    properties:
+      kind:     { const: group }
+      id:       { type: string, minLength: 1 }
+      name:     { type: string }
+      doc:
+        type: string
+        description: Description for LSP hover documentation.
+      meta:
+        $ref: '#/$defs/FieldMeta'
+      category: { $ref: '#/$defs/CategoryToken' }
+      children:
+        type: array
+        items:
+          $ref: '#/$defs/Container'
+
+  RepeatCount:
+    description: |-
+      Repetition specifier: a numeric expression, the string "eos"
+      (repeat until the boundary of the nearest enclosing scope-providing
+      container — a bounded scope, an encrypted.plaintext struct, or the
+      top-level body, §5), or an until-condition object.
+    oneOf:
+      - $ref: '#/$defs/Expr'
+      - type: string
+        const: eos
+      - type: object
+        required: [until]
+        additionalProperties: false
+        properties:
+          until: { $ref: '#/$defs/Expr' }
+
+  Repeat:
+    type: object
+    required: [kind, id, element, count]
+    additionalProperties: false
+    description: |-
+      Repeats a Struct a given number of times. The decoder injects the
+      completed iteration count into env[repeat.id] before normalization — for
+      count: eos repeats (where it is detected at parse time) and for
+      fixed-count repeats (where it trivially equals the count expression),
+      §10.7. A ref whose field is this repeat's id therefore evaluates to that
+      iteration count (§4).
+    properties:
+      kind:     { const: repeat }
+      id:       { type: string, minLength: 1 }
+      name:     { type: string }
+      element:  { $ref: '#/$defs/Struct' }
+      count:    { $ref: '#/$defs/RepeatCount' }
+      category: { $ref: '#/$defs/CategoryToken' }
+      doc:      { type: string }
+
+  Switch:
+    type: object
+    required: [kind, id, on, cases]
+    additionalProperties: false
+    description: |-
+      Selects one Struct arm based on a discriminator expression.
+      Case key formats: exact decimal "6", range "0-127", list "6,17,58",
+      or catch-all "_". Keys are matched in order: exact → list → range → "_".
+      The "_" key must appear inside the cases map (no separate default property).
+    properties:
+      kind: { const: switch }
+      id:   { type: string, minLength: 1 }
+      name: { type: string }
+      on:   { $ref: '#/$defs/Expr' }
+      cases:
+        type: object
+        description: |-
+          Keys: decimal "6", range "0-127", list "6,17,58", or "_" (catch-all).
+          Evaluation order: exact → list → range → "_".
+        additionalProperties:
+          $ref: '#/$defs/Struct'
+      doc:  { type: string }
+
+  Encrypted:
+    type: object
+    required: [kind, id, plaintext]
+    additionalProperties: false
+    description: |-
+      Marks a region as encrypted. In wire view the region appears as an
+      opaque block; in semantic view plaintext fields are shown. Inside
+      plaintext the remaining and enclosingBits expressions are available, but
+      only when wireBits is present: wireBits is the plaintext byte/bit budget,
+      so if it is absent the plaintext budget is undefined and
+      remaining/enclosingBits inside it are validation errors (§5, §11.1).
+    properties:
+      kind:        { const: encrypted }
+      id:          { type: string, minLength: 1 }
+      name:        { type: string }
+      plaintext:   { $ref: '#/$defs/Struct' }
+      wireBits:    { $ref: '#/$defs/Expr' }
+      contextNote:
+        type: string
+        minLength: 1
+        description: Human-readable note shown in the encrypted-region tooltip.
+      headerProtected:
+        type: array
+        description: Field ids within plaintext that are also header-protected.
+        items: { type: string }
+      category: { $ref: '#/$defs/CategoryToken' }
+      doc:      { type: string }
+
+  RefContainer:
+    type: object
+    required: [kind, ref, id]
+    additionalProperties: false
+    description: |-
+      Inlines a named Struct from `defs` (or imported defs). Expanded field
+      ids are prefixed with `{id}.` (e.g. ref id "src" + field "oct0" →
+      "src.oct0"). Inside a repeat, expanded ids become "{ref.id}.{field.id}#N".
+      The ref target must exist in defs or an imported namespace.
+      Non-recursive circular references are a validation error.
+      A ref is a transparent expansion (inherits surrounding scope).
+    properties:
+      kind: { const: ref }
+      ref:
+        type: string
+        minLength: 1
+        description: |-
+          Key into the packet-level `defs` map, or a namespaced import
+          reference (e.g. "addr.ipv4Addr").
+      id:
+        type: string
+        pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$'
+      name: { type: string }
+
+  AlignContainer:
+    type: object
+    required: [kind, to]
+    additionalProperties: false
+    description: |-
+      Consumes zero or more bytes to align the current parse position to a
+      given bit boundary, measured from the absolute wire/packet origin. `to`
+      must be a positive integer power of 2 and a multiple of 8. If a preceding
+      sub-byte bits field left the cursor mid-byte, align first rounds up to the
+      next whole byte, then advances to the `to` boundary (§5). Inside a bounded
+      scope, padding bytes are charged against the scope byte budget; an align
+      whose padding exceeds the remaining budget is a runtime error (§5). At the
+      top-level body (or any scope), if the computed padding would run past the
+      injected end-of-data the align consumes only the bytes actually available
+      and does not error (it caps at the scope/packet end) — covering SCTP
+      last-chunk optional padding (RFC 4960 §3.2), §5.
+      Alignment padding bytes are excluded from any enclosing checksum coverage
+      unless this container's `id` is explicitly listed in checksumCovers. `to`
+      not a positive power of 2 that is a multiple of 8 is a validation error.
+    properties:
+      kind: { const: align }
+      to:
+        type: integer
+        minimum: 1
+        description: |-
+          Alignment target in bits. Must be a positive integer power of 2 and
+          a multiple of 8 (e.g. 8, 16, 32, 64). Validator MUST reject values
+          that are not a power of 2 or not a multiple of 8.
+      fill:
+        type: integer
+        minimum: 0
+        maximum: 255
+        description: |-
+          Byte value used to fill padding bytes during serialization. When
+          present, decoders also validate that incoming padding bytes equal
+          this value (mismatch is a validation warning, §11.3). Range 0–255;
+          values outside this range are a validation error. When absent,
+          the fill value is encoder/decoder-defined. Example use: SCTP and
+          Diameter mandate zero-fill padding (fill: 0).
+      id:
+        type: string
+        pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$'
+        description: Optional identifier if the padding bytes need to be referenced.
+      doc: { type: string }
+
+  BoundedContainer:
+    type: object
+    required: [kind, id, bytes, fields]
+    additionalProperties: false
+    description: |-
+      Constrains parsing of its contents to a declared byte count. Creates a
+      sub-stream cursor so that count:eos repeats terminate at the scope boundary.
+      Inside a bounded scope, n: { kind: remaining } on a bytes field consumes
+      all remaining bytes in this scope. Bounded scopes may be nested. A
+      count: eos repeat more generally terminates at the boundary of its nearest
+      enclosing scope-providing container — a bounded scope, an
+      encrypted.plaintext struct (its wireBits budget), or the top-level body —
+      not only a bounded scope (same scope-provider list as remaining/
+      enclosingBits, §4, §5).
+    properties:
+      kind: { const: bounded }
+      id:
+        type: string
+        pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$'
+        description: Scope identifier.
+      bytes:
+        $ref: '#/$defs/Expr'
+        description: Expression giving the byte count of this scope.
+      fields:
+        type: array
+        items:
+          $ref: '#/$defs/Container'
+        description: Ordered list of containers parsed within the scope.
+      name: { type: string }
+      doc:  { type: string }
+
+  # ────────────────────────────────────────────────────────────────────
+  # Constraints
+  # ────────────────────────────────────────────────────────────────────
+  Constraint:
+    type: object
+    required: [lhs, rhs]
+    additionalProperties: false
+    description: |-
+      Equality constraint between two expressions. Evaluated independently
+      of body parsing; may reference any field regardless of document position.
+      Back-propagation is fixpoint-iterated: the solver reruns until no new
+      fields are resolved in a pass. Only single-unknown linear expressions
+      can be auto-solved; multi-unknown / non-linear are validation-only.
+    properties:
+      lhs: { $ref: '#/$defs/Expr' }
+      rhs: { $ref: '#/$defs/Expr' }
+      doc: { type: string }

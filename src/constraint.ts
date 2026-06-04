@@ -5,11 +5,6 @@ export type PropagateOk = { ok: PacketEnv };
 export type PropagateConflict = { conflict: string };
 export type PropagateResult = PropagateOk | PropagateConflict;
 
-function singleRef(expr: Expr): string | null {
-  if (expr.kind === "ref") return expr.field;
-  return null;
-}
-
 function solveFor(
   expr: Expr,
   targetRef: string,
@@ -75,6 +70,35 @@ function invertRight(o: string, result: number, known: number): number | null {
   return null;
 }
 
+/** Refs in `expr` whose value is not yet known in `env`. */
+function unknownRefs(expr: Expr, env: PacketEnv): string[] {
+  return uniqueRefs(expr).filter((r) => !env.has(r));
+}
+
+/**
+ * Given that `known` is the value of one side of an equality, try to use it to
+ * resolve the other (`other`) side: solve its single unknown, or detect a
+ * conflict when it is fully determined and disagrees.
+ */
+function applyKnownSide(
+  known: number,
+  other: Expr,
+  next: PacketEnv,
+): PropagateConflict | null {
+  const unknowns = unknownRefs(other, next);
+  if (unknowns.length === 0) {
+    const otherVal = evalConst(other, next);
+    if (otherVal !== null && otherVal !== known)
+      return { conflict: `Constraint failed: ${known} ≠ ${otherVal}` };
+    return null;
+  }
+  if (unknowns.length === 1) {
+    const solved = solveFor(other, unknowns[0]!, known, next);
+    if (solved !== null) next.set(unknowns[0]!, solved);
+  }
+  return null;
+}
+
 export function propagate(
   constraints: Constraint[],
   env: PacketEnv,
@@ -82,45 +106,19 @@ export function propagate(
 ): PropagateResult {
   const next: PacketEnv = new Map(env);
   for (const c of constraints) {
-    const lhsRef = singleRef(c.lhs);
-    const rhsRef = singleRef(c.rhs);
-    const lhsHas = containsRef(c.lhs, changedKey);
-    const rhsHas = containsRef(c.rhs, changedKey);
-    if (!lhsHas && !rhsHas) continue;
-    if (lhsHas) {
-      const lhsVal = evalConst(c.lhs, next);
-      if (lhsVal === null) continue;
-      if (rhsRef) {
-        next.set(rhsRef, lhsVal);
-      } else {
-        const targets = uniqueRefs(c.rhs);
-        if (targets.length === 1) {
-          const solved = solveFor(c.rhs, targets[0]!, lhsVal, next);
-          if (solved !== null) next.set(targets[0]!, solved);
-        } else {
-          const rhsVal = evalConst(c.rhs, next);
-          if (rhsVal !== null && rhsVal !== lhsVal)
-            return { conflict: `Constraint failed: lhs=${lhsVal} rhs=${rhsVal}` };
-        }
-      }
+    if (!containsRef(c.lhs, changedKey) && !containsRef(c.rhs, changedKey)) continue;
+    const lhsVal = evalConst(c.lhs, next);
+    const rhsVal = evalConst(c.rhs, next);
+    if (lhsVal !== null && rhsVal !== null) {
+      if (lhsVal !== rhsVal) return { conflict: `Constraint failed: lhs=${lhsVal} rhs=${rhsVal}` };
       continue;
     }
-    if (rhsHas) {
-      const rhsVal = evalConst(c.rhs, next);
-      if (rhsVal === null) continue;
-      if (lhsRef) {
-        next.set(lhsRef, rhsVal);
-      } else {
-        const targets = uniqueRefs(c.lhs);
-        if (targets.length === 1) {
-          const solved = solveFor(c.lhs, targets[0]!, rhsVal, next);
-          if (solved !== null) next.set(targets[0]!, solved);
-        } else {
-          const lhsVal = evalConst(c.lhs, next);
-          if (lhsVal !== null && lhsVal !== rhsVal)
-            return { conflict: `Constraint failed: lhs=${lhsVal} rhs=${rhsVal}` };
-        }
-      }
+    if (lhsVal !== null) {
+      const conflict = applyKnownSide(lhsVal, c.rhs, next);
+      if (conflict) return conflict;
+    } else if (rhsVal !== null) {
+      const conflict = applyKnownSide(rhsVal, c.lhs, next);
+      if (conflict) return conflict;
     }
   }
   return { ok: next };

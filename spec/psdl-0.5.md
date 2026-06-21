@@ -34,6 +34,14 @@ body:
     name: IHL
     type: { kind: int, bits: 4 }
     category: length
+  - id: totalLength
+    name: Total Length
+    type: { kind: int, bits: 16 }
+    category: length
+  - id: dataLength
+    name: Data Length
+    type: { kind: int, bits: 16 }
+    category: length
 constraints:
   - lhs: { kind: ref, field: totalLength }
     rhs:
@@ -59,6 +67,15 @@ defs: {}
 | `defs` | no | Named struct definitions for reuse |
 | `imports` | no | Cross-file def imports (see §1.2) |
 
+**Packet set.** A *packet set* (also called a *registry*) is the set of PSDL
+documents a tool has activated at one time — e.g. `@packet-schema/presets`, a
+user-supplied directory of PSDL files, or a combination. The `name` uniqueness
+rule above is scoped to a packet set: two documents in the same active set
+MUST NOT share a `name`. `meta.aliases` values carry no uniqueness
+requirement, but a tool SHOULD emit a validation warning when two documents in
+the same set declare the same alias, or when one document's alias equals
+another document's `name` (see §7 for the resolution priority).
+
 ### 1.1 Packet metadata (`meta`)
 
 ```yaml
@@ -71,6 +88,14 @@ meta:
 All fields are optional. Used by codegen, Chrome extension, and LSP for
 disambiguation and cross-reference.
 
+**Multi-layer RFC provenance.** `meta.rfc` also accepts an object
+`{ defined, updates? }` that records the defining RFC and the chain of RFCs that
+later updated the field, so an LSP can render "defined by RFC 791, updated by
+RFC 2474 §3, RFC 3168 §5". Each `updates` entry is either a bare RFC number or
+an object `{ rfc, section? }` naming the section of that updating RFC; the
+sibling `meta.section` names the section of the defining RFC. See §5.4 for the
+full definition; it is valid at every level that carries `meta`.
+
 ### 1.2 Cross-file imports (`imports`)
 
 The `imports` list makes `defs` from other PSDL files available under a
@@ -80,7 +105,7 @@ without copy-pasting.
 
 ```yaml
 imports:
-  - source: common/addresses.psdl
+  - source: common/addresses.psdl   # a body: [] def-only library (see below)
     as: addr
   - source: "@packet-schema/presets/tls-types"
     as: tls
@@ -90,15 +115,62 @@ After import, the imported defs are accessible with the prefix:
 `ref: addr.ipv4Addr`. Expanded ids follow the same dotting rules:
 `addr.ipv4Addr.oct0`.
 
+**Definition-only library documents.** `body` is required, but it may be the
+empty array `[]`. A document whose `body` is **exactly** the empty array
+(`body.length === 0`) is a *def library*: its role is limited to providing
+`defs` to be used as the `source` of another document's `imports`. (A def
+library is identified solely by `body: []`; whether its `defs` is empty or
+populated does not change this — an empty-`defs`, empty-`body` document is still
+a def library, just an unhelpful one.) A library document is not a member of any
+packet set for rendering or `next` resolution: tools MUST NOT list a document
+whose `body` is the empty array as a registry `next` target, a deep-link
+target, or a renderer entry. The `name`-uniqueness rule (§1) still applies to
+library documents (so import resolution can diagnose name clashes). A library
+document is, like any other document, subject on its own to §6 ref-cycle
+validation and §15 version validation. A `body: []` library document MUST still
+declare a `name` and a `version` like any other document. To represent a real
+protocol that genuinely has zero displayed/`next`-dispatching fields while
+keeping registry visibility, place at least one container in `body` (e.g. a
+zero-width `virtual`, or an explicit placeholder field) rather than relying on
+`body: []`.
+
 **Rules:**
 
-- `source` is an opaque path string. Resolution strategy (filesystem path,
-  package registry, URL) is the concern of the tool layer.
+- `source` is a path string interpreted by the tool layer. Two syntactic
+  conventions are distinguished for interoperability: a `source` beginning
+  with `@` (e.g. `@packet-schema/presets/tls-types`) is a **registry
+  reference** whose resolution (package manager, preset bundle, URL scheme)
+  is tool-defined; any other `source` (whether or not it begins with `./` or
+  `../`) is a **file path** and SHOULD be resolved relative to the directory
+  of the importing document. A tool that resolves imports and deviates from
+  these conventions MUST document its resolution strategy.
 - `as` defines the namespace prefix; must match `[a-zA-Z][a-zA-Z0-9_]*`.
 - Two imports must not share the same `as` prefix — validation error.
 - Circular imports (A imports B which imports A) are a validation error.
-- Imported defs are read-only; a document cannot re-declare an imported name.
+- Imported defs are read-only. Re-declaration is defined precisely as: (i) a
+  local `defs` key equal to an import's `as` prefix is a **validation error**
+  (a `ref: addr` could otherwise resolve ambiguously between the def and the
+  prefix); (ii) two imports sharing one `as` prefix is a validation error (the
+  rule above). A local def whose bare name equals a bare def name inside an
+  imported file is **legal** — imported defs are only ever accessed through
+  their prefix-qualified form, so no collision arises.
 - If a `source` cannot be resolved, it is a validation error.
+- **Validation layering.** Import-resolution-dependent conditions — an
+  unresolvable `source`, a circular import chain, a `ref` target reachable
+  only through a transitive import — are detected by **the layer that
+  resolves imports** (the tool layer). A core validator that does not resolve
+  imports performs only the syntactic and local checks (`source` non-empty,
+  `as` format, duplicate `as`, the `defs`-key/`as`-prefix collision above) and
+  MUST NOT report resolution-dependent errors it cannot observe. The layer
+  that resolves imports MUST re-run §6 ref-cycle detection over the merged def
+  set, since a cycle passing through an import boundary is invisible to the
+  unresolved-document check.
+- **Imported document versions.** The §15 version-compatibility rules apply to
+  each document **independently**, including imported ones: a difference
+  between the importer's and the imported file's `version` is **not** itself
+  an error. An imported document whose version is outside the tool's
+  supported range is diagnosed per §15 (warning, or hard error on a higher
+  MAJOR); it is *not* reported as "source cannot be resolved".
 - **Imports are not re-exported.** A document sees only the defs declared in
   the files it directly lists in its own `imports`. If file B imports C under
   prefix `c`, that prefix is **not** visible to A after A imports B. If A
@@ -139,7 +211,38 @@ and protocol linking.
   generated. These dotted forms are used in expressions and `checksumCovers`
   but are never authored directly in YAML.
 - Import namespace prefixes (§1.2) further qualify def names: `addr.ipv4Addr`.
-- Ids must be unique within their visible scope (see §10.1 for scoping rules).
+- **Expanded-id uniqueness.** Within one document, no two declarations may share
+  the same **expanded id** while both can be live in the `env` at the same time.
+  The *expanded id* of a field/container is the id of the emitted leaf — the
+  ref-prefix-joined id (`{ref.id}.{field.id}`, nested as `{a.id}.{b.id}.…`); a
+  `group`, `optional`, `bounded`, `encrypted`, or `align` does **not** contribute
+  to the prefix, and only `ref` does. The `#N` / `#N_M` repeat-index suffix is a
+  runtime instance handle (§6), not part of the expanded id; a `repeat` instead
+  opens a distinct id namespace, so its element-field ids never collide with
+  non-repeat siblings, and a field repeated across iterations is one declaration
+  distinguished at runtime by `#N`. Two declarations that produce the same
+  expanded id and can be simultaneously live are a **validation error**.
+  **Exception:** two declarations under **different arms of the same `switch`**
+  are never live at once, so they MAY reuse an id; a duplicate **inside** one
+  arm, or a clash between an arm field and an enclosing-scope field, is **not**
+  allowed. A `ref` instantiation id (`{ref.id}`) is itself a key in the parent
+  namespace and obeys the same rule. Reusing an authored **bare** id across
+  distinct instantiations (the §6 nearest-preceding idiom) is legal as long as
+  the resulting expanded ids differ (`first.len` vs `second.len`).
+- **Reference existence.** A `ref.field` / `wireSize.target` in a **body** or
+  **`constraints`** expression must name an id that is **declared somewhere in
+  the document** (a field/container id, a local-ref-expanded dotted id, or a
+  repeat id; bare ids resolve after expansion per §6, so a bare id is valid when
+  it equals the tail segment of some expanded id). A reference to an id declared
+  nowhere is a validation error. A `{id}#N` repeat-indexed form may not appear
+  in an expression (the runtime `#N` instance handle is not addressable, §10.4)
+  — a validation error. **Scope:** this check covers leaf `ref`/`wireSize` in
+  body and `constraints` expressions only. Expressions authored *inside a `def`
+  body* (resolved per instantiation), and `prevIter` / `enclosingField`
+  references (which name a repeat-iteration slot or an enclosing-layer field, not
+  a document id), are out of scope. A dotted target whose head segment is an
+  `imports` `as` prefix is **import-qualified**; its resolution is deferred to
+  the import-resolving layer (§1.2) and is not checked by the core validator.
 
 ---
 
@@ -153,6 +256,14 @@ Every `Field` has a `type` describing how bits on the wire map to a value.
 type: { kind: int, bits: 16 }              # unsigned 16-bit
 type: { kind: int, bits: 8, signed: true } # signed 8-bit
 ```
+
+A field with `signed: true` is decoded as a **two's-complement** integer of
+the declared bit width (the wire bits are unchanged; only the numeric
+interpretation differs). `signed` has no effect on byte order (§12).
+
+An `int` field may carry `subfields` — mask-addressed bit subfields read over
+its decoded value (bit 0 = LSB) — to annotate LSB-first / little-endian word bit
+packing without misordering bits (§12).
 
 ### `bits` — raw bit field
 
@@ -187,11 +298,47 @@ type: { kind: bytes, n: { kind: ref, field: length } }
 type: { kind: bytes, n: { kind: remaining } }  # all remaining bytes in the enclosing scope
 ```
 
+**Delimiter-terminated length (`delimiter`).** Besides an expression, `bytes.n` may
+take the form `{ delimiter: <byteList> }`. `delimiter` is a non-empty
+list of byte integers (each `0`–`255`). The field spans from the current parse
+position forward up to **and including** the first complete occurrence of the
+delimiter byte sequence; the delimiter is **always consumed** and is part of the
+field's wire footprint (and of any `display` rendering — e.g. a CRLF-terminated
+HTTP request line displayed as `ascii` includes its trailing `\r\n`). The scan
+is forward-only and relative, preserving the §16 parse model. Length is a
+decoder-determined value supplied by seed injection (§10.7). This `delimiter`
+form (a byte-sequence terminator on a `bytes` field) and the
+`repeat.count.until` after-iteration boolean predicate (§5) are unrelated
+constructs that share no keyword; the delimiter-not-found and scan-boundedness
+rules are given in §10.7 and §11.2.
+
+```yaml
+# HTTP/1 request line (CRLF-terminated; CRLF consumed)
+- id: requestLine
+  name: Request line
+  display: ascii
+  type: { kind: bytes, n: { delimiter: [13, 10] } }   # CRLF
+
+# NUL-terminated string (SMB1/RTSP)
+- id: filename
+  name: Filename
+  display: ascii
+  type: { kind: bytes, n: { delimiter: [0] } }
+```
+
 A `bytes` field may carry a `display` hint (§14) to tell display-layer tools
 how to render the payload: `ascii`/`utf8` for text (an HTTP request line, SIP,
 DNS labels), `addr` for a structured address (MAC, IPv6), or the default `hex`
 for an opaque blob. This is **display-only** and carries no wire semantics
 (`bytes` round-trips identically regardless).
+
+> **Numeric value reinterpretation (out of scope).** Reinterpreting wire bits
+> as IEEE754 floating point, fixed-point (e.g. NTP 16.16/32.32), or BCD/TBCD
+> decimal digits is a **codec/tool-layer concern** in 0.5. `int`/`bytes`
+> describe wire structure only; `display` (§14) selects a base/rendering and
+> never performs value reinterpretation. See §14 for the design note on how a
+> future minor may add structured value reinterpretation without overloading
+> `display`.
 
 > **Name-compression pointers (out of scope).** Name-compression pointers
 > (DNS RFC 1035 §4.1.4, NBNS, mDNS) are representable at the wire level as a
@@ -234,7 +381,10 @@ for an opaque blob. This is **display-only** and carries no wire semantics
 
 ### `enum` — named enumeration
 
-Keys are numeric values; values are labels (optionally with doc).
+Keys are numeric values; values are labels (optionally with doc). A variant is
+either a plain string label or an object; the object form carries `label`
+(required) and MAY carry `doc`, `level` (absent ≡ `may`, §9.1), and `meta`
+(§5.4).
 
 ```yaml
 type:
@@ -264,8 +414,8 @@ also unknown, making the subsequent parse stream position indeterminate.
 |-------|-------------|
 | `quic` | QUIC variable-length integer (RFC 9000 §16) |
 | `protobuf` | Protocol Buffers varint (base-128, little-endian groups) |
-| `cbor` | CBOR unsigned integer (major type 0) |
-| `ea-terminated` | Extension-bit: byte LSB=0 means more bytes follow, LSB=1 = last byte (Frame Relay DLCI, LAPD) |
+| `cbor` | CBOR unsigned integer (major type 0, RFC 8949 §3) |
+| `ea-terminated` | Extension-bit: byte LSB=0 means more bytes follow, LSB=1 = last byte (see below) |
 | `leb128` | Unsigned LEB128 (WASM, DWARF) |
 
 ```yaml
@@ -273,6 +423,28 @@ type: { kind: varint, encoding: quic }
 type: { kind: varint, encoding: ea-terminated }
 type: { kind: varint, encoding: my-custom-scheme }
 ```
+
+**`ea-terminated`, precisely.** In each byte, bit 0 (the LSB) is the EA /
+continuation bit (`0` = more bytes follow, `1` = last byte) and bits 7..1 are
+**value bits**. The value is formed by concatenating the 7-bit value groups
+**MSB-first**: the first byte on the wire contributes the most-significant
+group (the same group order as BER OID subidentifiers, *not* the
+little-endian group order of `protobuf`/`leb128`). Formats that interleave
+non-value control bits with the address bits — Q.922 Frame Relay address
+fields (C/R, FECN, BECN, DE interleaved with the DLCI) and LAPD address
+fields (C/R interleaved with SAPI/TEI) — are **not** plain `ea-terminated`
+varints and MUST NOT be modelled as one; decompose them with explicit `bits`
+fields (and a `switch` on the EA bits if the field is variable-length)
+instead.
+
+**`cbor`, precisely.** `cbor` decodes a CBOR unsigned integer per RFC 8949
+§3: the initial byte's major type (upper 3 bits) must be `0`, and the
+additional-information value (lower 5 bits) selects an immediate value (0–23)
+or a 1/2/4/8-byte big-endian argument (24–27). An initial byte whose major
+type is not `0`, or whose additional information is 28–31
+(reserved/indefinite), is a **runtime error** (§11.2) — the byte count
+consumed is indeterminate, the same failure class as an unimplemented
+`varint` encoding.
 
 > **CoAP option delta/length:** CoAP uses a 4-bit base nibble with sentinel
 > values 13, 14, 15 triggering 1- or 2-byte extensions. This pattern is not
@@ -308,7 +480,8 @@ type: { kind: berLength, maxBytes: 3 }
 ## 4. Expressions
 
 Expressions are pure, serialisable values used in field lengths, repeat counts,
-switch discriminators, and optional conditions.
+switch discriminators, optional conditions, and on both sides of `constraints`
+(§9).
 
 ### Literal
 
@@ -323,6 +496,23 @@ expression is expected:
 count: 4                           # equivalent to { kind: lit, value: 4 }
 type: { kind: bytes, n: 0 }        # n: 0 is equivalent to n: { kind: lit, value: 0 }
 ```
+
+**Value domain.** Expression values are integers. Implementations MUST evaluate
+`+`, `−`, `*`, `/`, `%`, the comparisons, and table lookups exactly for all
+operands and results in the closed range `[0, 2^53−1]` (and their negations
+arising from `−` or signed references, i.e. down to `−(2^53−1)`). Authors SHOULD
+keep every value that participates in an expression within this range; an
+expression input — a literal, a referenced field value, a peek result, or an
+intermediate result — that a tool can statically prove exceeds it MAY be
+reported as a lint advisory (should-level), never a hard error. Bitwise and
+shift operators remain 32-bit as defined below. The numeric value a decoder
+*stores and displays* for a field (e.g. a 64-bit sequence number, nonce, or
+timestamp) is independent of this expression domain and MUST be decoded and
+displayed without loss for the field's full declared width up to 64 bits; such
+wide values are display values, not expression inputs. Arithmetic `+`, `−`, `*`
+whose true result exceeds the guaranteed exact range has decoder-defined
+behavior (exact, wrapped, or error), analogous to varint overflow (§11.3);
+authors must not rely on a particular overflow mode.
 
 ### Field reference
 
@@ -380,6 +570,26 @@ Available operators:
 | `<<` `>>` | Shift | Arithmetic right shift; operates on 32-bit integers |
 | `==` `!=` `<` `<=` `>` `>=` | Comparison | Result is `0` or `1` |
 | `&` `\|` `^` | Bitwise AND / OR / XOR | Operates on 32-bit integers |
+
+The arithmetic and bit-operation semantics are normative:
+
+- `%` is the **truncated remainder** paired with the truncating `/`: the
+  result takes the **sign of the dividend** (`-3 % 4 == -3`, not the floored
+  or Euclidean `1`). Negative dividends can arise from `-` arithmetic or from
+  `signed` field references; authors must not assume a Euclidean modulo.
+- `<<` truncates both operands to 32 bits and yields an **unsigned 32-bit**
+  result in `0 .. 2^32−1` (`1 << 31 == 2147483648`).
+- `>>` is an **arithmetic (sign-propagating) right shift** over the signed
+  32-bit interpretation of the left operand.
+- `&` `|` `^` truncate both operands to 32 bits and yield a **signed 32-bit**
+  result (two's-complement interpretation: `0x80000000 & 0xFFFFFFFF ==
+  -2147483648`).
+
+A consequence of the last two rules is that `(1 << 31)` and
+`(0x80000000 & 0xFFFFFFFF)` denote the same bit pattern but compare unequal
+(`2147483648` vs `-2147483648`). When a high-bit 32-bit value must be
+compared, normalise both sides through the same operator family (e.g. mask
+both with `&`).
 
 > **Note on 64-bit fields.** Bitwise and shift operators are evaluated as 32-bit
 > integers. For fields wider than 32 bits, use arithmetic operators and `cond`
@@ -449,11 +659,17 @@ position**, without consuming them. `offset` defaults to `0`.
 - `peek` may only appear in `switch.on`, `optional.when`, and
   `repeat.count` (including the `until` sub-expression). Using it inside
   `bytes.n` or `encrypted.wireBits` is a validation error.
+- `bits` must be an integer in `1`–`64`. A `bits` value outside `1`–`64` is a
+  validation error (§11.1).
 - The offset is relative to the **current parse position** at evaluation time.
   The exact definition of "current parse position" for each context is given in
   §10.6.
 - If the peeked region extends beyond available data, the result is `0`.
 - `peek` is the only expression form that may read data not yet parsed.
+- A `peek(b)` with `b` in `54`–`64` feeding `switch.on` / `optional.when` is
+  valid wire (the `1`–`64` bound is unchanged), but because its result can
+  exceed the guaranteed-exact value domain it MAY draw the should-level
+  input-range lint advisory above. That lint is advisory-only.
 
 ### Byte-bounded repeats
 
@@ -536,8 +752,25 @@ conditions that depend on the previous iteration.
 **Rules:**
 
 - `prevIter` is valid only inside `repeat.count.until`.
+- **"Most recently completed", precisely.** The `until` expression is evaluated
+  **after** an iteration is fully parsed. Within that evaluation, an ordinary
+  `ref` resolves to the **just-completed** iteration's field value, and
+  `prevIter` resolves to the value from the iteration **before** it. So when
+  `until` runs after iteration N (N ≥ 1, counting from 0): `ref: tsn` is
+  iteration N's `tsn` and `prevIter: tsn` is iteration N−1's `tsn`. `prevIter`
+  is the second-most-recent value precisely because the most-recent one is
+  already reachable by ordinary `ref`; the pair lets `until` compare the current
+  iteration against its predecessor (e.g. `tsn != prevIter(tsn) + 1`).
 - On the first iteration (no prior iteration exists), `prevIter.field`
   yields the field's seeded value per §10.2, or `0` if none.
+- **Absent in the prior iteration (sticky).** If the referenced field did not
+  exist in the immediately preceding iteration (its `switch` arm was not
+  selected, or its `optional` was not taken), `prevIter` does **not** reset to
+  the seed; it retains the value from the **most recent iteration in which the
+  field was present** (sticky). It falls back to the §10.2 seed (or `0`) only
+  when the field has not been present in any prior iteration. This matches the
+  reference implementation, which overwrites the `prevIter` slot only when the
+  prior iteration actually produced the field.
 - Using `prevIter` outside `repeat.count.until` is a validation error.
 
 > **Cross-iteration invariants** (e.g. "SCTP DATA chunk TSNs must be strictly
@@ -738,6 +971,7 @@ Full property reference:
 | `checksumCovers` | no | Fields covered by this checksum (see §8) |
 | `checksumPseudoHeader` | no | Well-known pseudo-header to prepend (see §8) |
 | `checksumParams` | no | CRC algorithm parameters (see §8) |
+| `subfields` | no | Mask-addressed bit subfields over an `int` / byte-aligned `bits` field; display/annotation only (see §12) |
 
 #### 5.1 Category tokens
 
@@ -753,6 +987,15 @@ Full property reference:
 | `variable` | Payload or generic variable data |
 | `payload-marker` | Marks the start of the upper-layer payload |
 
+These **nine tokens are a closed set**: `category` is constrained to this enum
+by the JSON Schema, so any other token is a **validation error** (§11.1). PSDL
+0.5 does not provide a token for padding, sequence numbers, or timestamps (use
+`reserved` for must-be-zero padding, and leave sequence/timestamp fields
+without a `category`); a future MINOR may extend the set. `category` is a
+property of `Field`, `group`, and `encrypted` only — an `align` container
+**cannot carry a `category`** (its padding bytes are not a semantic field), so
+there is no token for alignment padding.
+
 #### 5.2 `const`
 
 Declares that this field must carry a fixed value. A mismatch is a runtime
@@ -766,6 +1009,205 @@ for seeding purposes.
   type: { kind: int, bits: 4 }
   const: 4
   category: identifier
+```
+
+#### 5.3 Value dictionaries (`values`)
+
+A field MAY carry a `values` array: an **open** dictionary that annotates
+individual discrete values (or inclusive ranges) with meaning, normative
+strength, and provenance. It applies to any field whose value space is discrete
+— `int`, `bits`, `enum`, `varint`, `berLength`.
+
+`values` is **annotational only**. It does NOT close the value space: a value
+absent from the dictionary is still a valid wire value. It carries **no wire
+semantics** and has no effect on parsing, layout, or expression scoping. It is
+distinct from `next` (§7), which is a dispatch map, and from `enum.variants`
+(§3), which supplies display labels and governs raw-integer fallback. A
+whole-field `values` dictionary coexists with `subfields` as an independent,
+non-exclusive annotation layer; see §12.
+
+Each entry sets exactly one of three matchers:
+
+- `value` — a single value;
+- `range` — `[min, max]`, inclusive;
+- `pattern` — a **ternary bit-pattern predicate**: a string of `0`, `1`, and
+  `x` (don't-care), read like a binary literal (rightmost character = bit 0).
+  It matches when every non-`x` bit equals the observed bit. This expresses
+  non-contiguous pools a contiguous range cannot, e.g. the DSCP
+  experimental/local-use pool whose low two bits are `11` (`pattern: "xxxx11"`,
+  equivalently `"11"` — characters beyond the pattern length are don't-care).
+  A pattern cannot encode a contradiction, so no extra validation is needed.
+  Uppercase `X` is accepted as a synonym for `x` (don't-care); lowercase is the
+  canonical spelling. Plain `value` is the fully-specified special case
+  (`value: 46` ≡ `pattern: "101110"`); keep `value` for readability. Values MAY
+  be negative on `signed` fields.
+
+  **Signed fields and pattern width.** The bit compared at each pattern position
+  is a bit of the **decoded numeric value** in **two's-complement** form, not
+  the raw field-width wire bits. For a non-negative value the two agree; for a
+  **negative** value on a `signed` field the compared bits are the (conceptually
+  infinite-width) two's-complement representation, so bit `i` of `-1` is `1` for
+  every `i`. Concretely, `pattern` bit `k` (counting from the right, bit 0)
+  matches when bit `k` of the decoded value's two's-complement encoding equals
+  the non-`x` pattern character; `x` positions are ignored. This is what the
+  reference resolver (`matchesPattern`) computes via arbitrary-width arithmetic
+  shifts, so patterns wider than 32 bits and negative values are both handled
+  without wrap-around. A `pattern` **longer than the field width** is not a
+  validation error: positions beyond the field's significant bits simply test
+  the sign-extended two's-complement bits of the decoded value (all-zero for an
+  unsigned or non-negative field, all-one above the sign bit of a negative
+  signed value), so an over-wide pattern is well-defined rather than rejected.
+
+Optional members: `name` (machine symbol), `label` (human label), `doc`,
+`level` (§9.1; absent ≡ `may`), and `meta` (`{ rfc?, section? }`, §5.4).
+
+Reverse lookup (value → meaning), used by LSP hover and renderers, resolves in
+this order: an exact `value` match always wins; otherwise the first entry (in
+array order) whose `range` contains the observed value or whose `pattern`
+predicate holds; otherwise none (out-of-list — still valid, just un-annotated).
+The reference resolver is `resolveValueEntry`.
+
+Relationship to `enum.variants`: `variants` remains the canonical label table
+for `enum` fields and the only structure that affects raw-integer fallback
+display (§11.3). `values` is a strictly additive annotation layer usable on
+**any** discrete field (including `enum`, where it complements `variants` with
+per-value `level`/`meta`). Tools SHOULD prefer `variants` for enum labels and
+use `values` for normative/provenance overlays.
+
+```yaml
+# IPv4 ToS octet, modern interpretation: DSCP (6 bits) + ECN (2 bits).
+- kind: group
+  id: tos
+  name: Differentiated Services
+  meta: { rfc: { defined: 791, updates: [{ rfc: 2474, section: "3" }, { rfc: 3168, section: "5" }] }, section: "1.4" }
+  children:
+    - id: dscp
+      name: DSCP
+      type: { kind: int, bits: 6 }
+      category: identifier
+      # `updates` entries may be bare numbers or { rfc, section? }; the two forms may be mixed.
+      meta: { rfc: { defined: 2474, updates: [3260, { rfc: 8622, section: "2" }] }, section: "3" }
+      values:
+        - { value: 0,  name: CS0, label: "Default / Best Effort", level: should }
+        - { value: 46, name: EF,  label: "Expedited Forwarding", doc: "RFC 3246", meta: { rfc: 3246 } }
+        - { range: [8, 8], name: CS1, label: "Class Selector 1", meta: { rfc: 2474 } }
+        # Non-contiguous pool: any codepoint ending in "11" is experimental/local-use.
+        - { pattern: "xxxx11", name: EXP, label: "Experimental / Local Use", level: may, meta: { rfc: 2474, section: "6" } }
+    - id: ecn
+      name: ECN
+      type: { kind: int, bits: 2 }
+      category: flags
+      meta: { rfc: { defined: 3168 }, section: "5" }
+      values:
+        - { value: 0, name: Not-ECT, label: "Not ECN-Capable Transport" }
+        - { value: 1, name: ECT1,    label: "ECN-Capable Transport (1)" }
+        - { value: 2, name: ECT0,    label: "ECN-Capable Transport (0)" }
+        - { value: 3, name: CE,      label: "Congestion Experienced", level: must }
+```
+
+**Two-stage dictionaries.** A `values` entry annotates a single field's value
+space and carries no cross-field condition. When the meaning of one field is
+governed by another — ICMP `code` depending on `type`, DNS `rcode` extended by
+the OPT pseudo-record, TCP option payloads keyed by `kind` — model it with a
+`switch` (§5) on the governing field and attach `values` to the dependent field
+**inside each arm**. The selected arm's dependent field then carries exactly the
+value dictionary valid for that discriminator, and a tool composes the two-level
+meaning (`type` label + arm-local `code` label) from the selected arm. PSDL has
+no single-field construct for a condition-dependent value table; the switch-arm
+pattern is the canonical form.
+
+**Sharing registry-scale dictionaries.** The canonical way to reuse one large
+`values` dictionary (the IANA EtherType registry ~400 entries, DNS RR `TYPE`
+~90, etc.) across multiple fields or documents is to wrap the single carrier
+field in a one-field `defs` struct and instantiate it with `ref` (locally) or
+share it via `imports` (cross-file). Reverse lookup then operates on the
+expanded leaf id (e.g. `ethType.value`). A field's declared `values` and `meta`
+**MUST be preserved unchanged through `ref` and `imports` expansion**: the
+expanded leaf `NormalizedField` carries the same `values`/`meta` as the field
+declared in the `def` (see the §5.4 propagation prose and the §6 transparent-
+expansion rules). This MUST applies **only to a field's own declared
+`values`/`meta`** (the `Field`-level `values` and `Field`-level `meta`); the
+`def` (NamedStruct) `meta` itself, and the `meta` of a switch arm / repeat
+element / encrypted / bounded / optional region, propagate **only** through the
+source AST per §5.4/§6 and do not appear in normalized/layout output (transparent
+expansion emits no region field to carry them).
+
+A shared value-dictionary `def` **SHOULD NOT** carry `next`: `next` is
+document-local dispatch metadata, and PSDL 0.5 provides no per-instantiation
+`next` override. Model document-specific dispatch on a local discriminator
+field, not inside a shared `def`. (A per-instantiation `next` override is a
+candidate for a future MINOR.)
+
+Enum variants (§3) MAY also carry `level` and `meta`; an absent variant `level`
+is `may`, matching value-dictionary entries.
+
+#### 5.4 Multi-layer RFC provenance (`meta.rfc`)
+
+`meta.rfc` accepts either a bare RFC number (the original 0.5 form) **or** an
+object `{ defined, updates? }` recording the RFC that originally defined the
+field and the ordered chain of RFCs that later updated its layout or semantics.
+`defined` is required; `updates` is an ordered (oldest-to-newest) list whose
+each entry is either a bare RFC number **or** an object `{ rfc, section? }` where
+`rfc` (required) is the updating RFC number and `section` (optional) names the
+section of *that* updating RFC. A bare-number `updates` entry carries no section.
+A bare number `N` for `meta.rfc` itself is equivalent to `{ defined: N }`. Both
+forms are valid at every level that carries `meta` — packet (§1.1), field, group,
+optional, struct (both a `defs` struct and the inline structs used as switch
+arms, repeat elements, and encrypted plaintext), and bounded/encrypted region.
+
+The sibling `meta.section` names a section of the *defining* RFC — `meta.rfc`'s
+`defined` value, or, for the bare-number form `rfc: N`, of RFC `N`. The section
+of an *updating* RFC is given by the `section` member of that entry's object
+form in `updates`. This is a clarification of the existing single
+`meta.section`, not a change to how existing 0.5 documents are read: `meta.section`
+has always referred to the field's defining/primary RFC, and the per-update
+`section` member is a new, optional refinement.
+
+This lets an LSP render provenance such as "defined by RFC 791, updated by
+RFC 2474, RFC 3168" instead of a single number, which is how the one-document,
+one-interpretation rule (§16.4) keeps historical reinterpretations as metadata
+rather than structural branches. Group-level `meta.rfc` reaches tooling via the
+normalized/layout output (`NormalizedField.groupMeta`, `LayoutField.meta`) for
+per-group deep-linking. Note: the layout collapses only the **innermost** group;
+an outer group that wraps only another group is not surfaced as a `LayoutField`.
+On the normalized output, each leaf's `NormalizedField.groupMeta` carries the
+meta of the **nearest enclosing group that defines one** — the innermost group's
+meta wins, and an outer group's meta is the fallback when the inner groups carry
+none — so an LSP that needs nested-group provenance should read the normalized
+output. An **encrypted region's** `meta` surfaces on the wire-view blob
+`NormalizedField` (alongside the region's `doc`/`category`), and from there on
+the `LayoutField`. A **bounded region's** `meta` is documentation-grade
+provenance available through the source AST only: `bounded` emits no container
+field in the flat normalized model, so its region meta does not appear in the
+normalized/layout output (same structural constraint as the nested-group note
+above). The same source-AST-only rule applies to the `meta` of an
+**optional** region, a **switch arm**, a **repeat element**, and a
+**`defs` struct**: these containers are transparent in the flat normalized
+model (they emit no container field of their own), so their region meta does
+not propagate to the normalized/layout output. Fields inside those regions
+remain attributable to their source region through
+`NormalizedField.switchCase` / `repeatIndex` / `originalContainerPath`, which
+an LSP can use to map an emitted field back to the authored region and its
+meta.
+
+> **Note (normative scope of the model names).** `NormalizedField` and
+> `LayoutField` name the **reference implementation's output model** (defined in
+> `src/types.ts`), not a normative wire structure; they are cited here only to
+> describe where each kind of `meta` surfaces. What is normative is the
+> **correspondence on the source AST**: every emitted leaf is attributable to
+> the authored container that produced it via its **switch-arm key**, its
+> **repeat index** (the `#N` / `#N_M` suffix, §6), and its **container path**
+> (the ordered list of enclosing container ids from `body` down to the leaf).
+> `NormalizedField.switchCase` / `repeatIndex` / `originalContainerPath` are the
+> reference implementation's concrete encoding of exactly these three source-AST
+> facts. An independent tool MAY use any representation that recovers the same
+> three facts; the spec does not mandate these field names or their on-disk
+> shape, only that the authored-region attribution be recoverable.
+
+```yaml
+meta:
+  rfc: { defined: 791, updates: [2474, 3168] }
+  section: "1.4"
 ```
 
 ### Ref (struct instantiation)
@@ -903,7 +1345,7 @@ when referenced by subsequent expressions.
 | `container` | yes | The container conditionally included |
 | `id` | no | Optional identifier. Assigns the container to a `rendererHints.sections` entry (§13) and may be the `target` of a `wireSize` (§4). For `wireSize`, target the inner field's `id` rather than the optional's `id`; an absent optional yields `0` |
 | `doc` | no | Description for LSP hover |
-| `meta` | no | RFC annotation `{ rfc?, section? }` for per-region deep-linking |
+| `meta` | no | RFC annotation `{ rfc?, section? }` for per-region deep-linking (source AST only, §5.4) |
 
 ### Repeat
 
@@ -966,12 +1408,36 @@ wrap the repeat in a `bounded` scope with `count: eos` (see §5 Bounded scope).
 
 The repeat `element` is an inline struct following the §6 Struct shape
 (`{ id, fields }`) and may therefore also carry `doc` (for LSP hover) and
-`meta { rfc?, section? }` (for per-region RFC deep-linking).
+`meta { rfc?, section? }` (for per-region RFC deep-linking; like a bounded
+region's meta it is available through the source AST only, §5.4).
 
 **`eos` repeat:** End-of-stream detection is decoder-specific. During the
 **seed** phase (§10.0), the decoder **MUST** inject the iteration count into
-`env[repeat.id]`. If the key is absent, the normalize phase defaults to `0`
-iterations.
+`env[repeat.id]` (under the fully-qualified key of §10.7). If the key is absent,
+the normalize phase defaults to `0` iterations.
+
+**`until` repeat — same injection contract.** A `count.until` repeat supplies
+its iteration count the **same way** as `count: eos`: the decoder evaluates the
+`until` predicate while it streams and injects the resulting completed-iteration
+count into `env[repeat.id]` (qualified per §10.7). The model does **not**
+re-evaluate `until` during normalize — with no injected count an `until` repeat,
+like an `eos` repeat, yields **`0` iterations**. (A tool that tried to
+self-evaluate `until` inside normalize would diverge from a streaming decoder,
+so the count is always taken from the injected env value.)
+
+**Boundary behaviour.** If a repeat reaches the end of its enclosing
+scope-providing container (a `bounded` budget, an `encrypted.plaintext`
+`wireBits` budget, or the packet end) **before** an `until` predicate becomes
+true, the repeat **terminates at the boundary** — running out of scope is a
+normal stop condition, not an error; the unmet `until` simply never fires.
+Conversely, if an element parse would **cross** the boundary partway through
+(the element is larger than the bytes left in scope), that is the
+over-read/under-read case of the enclosing scope (§5 Bounded scope / Encrypted):
+an authored `bounded`/`wireBits` budget over-read is a runtime error (§11.2),
+and at the packet/injected-data end a truncated element read is the truncated-
+capture runtime error (§11.2). This lets a TCP option list (RFC 9293) stop
+either on its `EOL`/sentinel `until` or on reaching the end of the options
+region, whichever comes first.
 
 ### Switch
 
@@ -1042,7 +1508,8 @@ not an error.
 
 Each case arm is an inline struct following the §6 Struct shape (`{ id,
 fields }`) and may therefore also carry `doc` (for LSP hover) and
-`meta { rfc?, section? }` (for per-region RFC deep-linking).
+`meta { rfc?, section? }` (for per-region RFC deep-linking; like a bounded
+region's meta it is available through the source AST only, §5.4).
 
 ### Alignment padding (`align`)
 
@@ -1065,15 +1532,26 @@ to the env).
 
 **Rules:**
 
-- The alignment reference point is the **absolute origin of the wire/packet
-  byte stream** (the first bit of the top-level packet). `position` below is
-  the parse position measured in bits from that absolute origin. Using the
-  absolute origin — rather than the start of the enclosing scope — guarantees
-  that `align` lands on a true wire boundary even when the enclosing
-  scope-providing container does not itself begin on a multiple of `to`
-  (e.g. a Grouped-AVP `bounded` scope that starts at an arbitrary offset).
+- The alignment reference point is the **origin of the byte stream this
+  document is parsing** — the first bit of the region handed to this PSDL
+  document. `position` below is the parse position measured in bits from that
+  origin. Using the document origin — rather than the start of the enclosing
+  scope — guarantees that `align` lands on a true wire boundary even when the
+  enclosing scope-providing container does not itself begin on a multiple of
+  `to` (e.g. a Grouped-AVP `bounded` scope that starts at an arbitrary offset).
   This matches the wire-absolute padding intent of SCTP/Diameter chunk
   alignment (§8).
+- **Origin under protocol linking.** When a document is nested via `next` (§7)
+  to parse a handoff payload, its origin is the **first bit of the payload
+  region passed to it**, not the first bit of the outermost capture buffer.
+  Each protocol-linked document parses with its own position counter reset to
+  `0` at the start of its region, and `align` boundaries are measured from that
+  per-document origin. (The reference implementation normalizes each document
+  independently with its position starting at `0`, so an inner protocol's
+  `align to: 32` aligns to a 4-byte boundary relative to where that inner
+  protocol began, regardless of the byte offset of the payload within the outer
+  frame.) For a document parsed at the top level this origin and the absolute
+  capture-buffer origin coincide.
 - `to` is restricted to multiples of 8, but a preceding sub-byte `bits` field
   (or bit-width `int`/`enum`, §3), or a wide `bits` field read as a raw
   MSB-first bit run (§12), may leave the cursor mid-byte. An `align`
@@ -1184,6 +1662,15 @@ maintaining a separate per-repeat accumulator.
   inner scope's remaining bytes, not any outer scope or the top-level body.
 - A `bounded` scope inside a `recursive: true` def correctly confines `eos`
   repeats to the scope boundary at each recursive call site.
+- **Budget over-/under-consumption.** The scope's `bytes` value is its exact
+  byte budget. If the contained containers consume **more** bits than the
+  budget (an over-read past the declared boundary), it is a **runtime error**
+  (§11.2). If they consume **fewer** bits (an under-read — e.g. a `count: eos`
+  repeat that stops short, or trailing bytes no field describes), the cursor is
+  **snapped forward to the scope end** so the next sibling container begins
+  exactly at the declared boundary; the unconsumed bytes are skipped, not
+  re-parsed. This makes the declared `bytes` length authoritative for
+  positioning regardless of how much the contents actually read.
 
 ### Encrypted
 
@@ -1196,7 +1683,7 @@ Marks a region as encrypted.
 | `plaintext` | yes | Struct describing the decrypted content |
 | `wireBits` | no | Expression for the encrypted region size in bits |
 | `contextNote` | no | Human-readable note shown in the encrypted-region tooltip |
-| `headerProtected` | no | Field ids within plaintext that are also header-protected |
+| `headerProtected` | no | Field ids that are header-protected by the cipher: either inside this plaintext, or a plaintext-external header field declared earlier in the same body (§5; annotation only) |
 | `name` | no | Human-readable label |
 | `category` | no | Semantic category token |
 | `doc` | no | Description |
@@ -1223,11 +1710,42 @@ Marks a region as encrypted.
   headerProtected: [contentType]
 ```
 
+**`headerProtected`.** `headerProtected` lists field ids that are
+header-protected by the cipher. Each id MUST resolve either to (a) a field
+declared as a **direct field of this encrypted container's plaintext**, or
+(b) a field declared in the **same body before this `encrypted` container in
+document order** — the plaintext-external header fields a header-protection
+scheme reorders or masks (e.g. QUIC's first byte and Packet Number, RFC 9001
+§5.4). This is a **presentation-layer annotation only**: it tags the resolved
+field in the normalized/layout output (`headerProtected: true`) and never
+affects parse position, `wireBits`, scope budgets, or the `env`. The resolution
+scope is exactly forward-only same-body: it cannot name a later field or a field
+in a different body, and resolution is by the field's **emitted id** (a
+top-level/direct header field's emitted id equals its bare id), which both the
+validator and the normalizer use as the single resolution set. When a plaintext
+field and an earlier same-body field share an id, the **plaintext field wins**
+(it is tagged during the plaintext walk; the external pass skips ids that name a
+plaintext field). An id that resolves to neither is a validation error (§11.1).
+The canonical plaintext-external pattern is QUIC: the long-header `firstByte`
+and `packetNumber` are declared as ordinary top-level fields before the
+`encrypted` payload container, and `headerProtected: [firstByte, packetNumber]`
+tags them.
+
 When `wireBits` is absent, the `encrypted.plaintext` struct has **no defined
 byte budget**: `remaining` and `enclosingBits` inside that plaintext have no
 defined value and using them is a validation error (§11.1), paralleling the
 top-level `body` 'no injected size' rule (§4). Provide `wireBits` whenever the
 plaintext contains budget-dependent expressions.
+
+When `wireBits` is present it is the plaintext's exact bit budget, and the
+**same over-/under-consumption rule as a `bounded` scope** applies: plaintext
+contents that consume **more** bits than `wireBits` are a **runtime error**
+(§11.2); contents that consume **fewer** snap the cursor forward to the
+`wireBits` boundary so the container after the `encrypted` region begins at the
+declared end. (An AEAD tag — e.g. the 16-byte QUIC tag — sits **outside** the
+`encrypted.plaintext` budget when `wireBits` measures only the plaintext; size
+`wireBits` to the plaintext extent and model any trailing tag as a sibling
+`bytes` field after the `encrypted` container.)
 
 #### End-anchored fields
 
@@ -1363,6 +1881,7 @@ target field references.
 | `id` | yes | Struct identifier (must match the key in `defs`) |
 | `fields` | yes | Ordered list of containers |
 | `doc` | no | Description for LSP hover and tooling |
+| `meta` | no | RFC annotation `{ rfc?, section? }` for the def as a whole (source AST only, §5.4) |
 | `recursive` | no | `true` enables self-referential structs (see below) |
 
 **Rules:**
@@ -1375,10 +1894,31 @@ target field references.
 - `const` on fields inside a `def` is enforced for every expanded instance.
 - A `ref` is a **transparent expansion**: it inherits surrounding scope
   (group membership, repeat index, etc.).
+- After `ref` (and `imports`) expansion, the expanded leaf inherits the source
+  field's declared `values`/`meta` unchanged (§5.3/§5.4). The `def`
+  (NamedStruct) `meta` itself, and region (switch arm / repeat element /
+  encrypted / bounded / optional) `meta`, are source-AST-only and are not
+  carried onto the expanded leaf (§5.4).
 - In a `repeat` element, the expanded field ids carry both the ref prefix
   and the repeat index: `{ref.id}.{field.id}#N` (e.g. `src.oct0#2`).
 - Scope ordering: expanded fields are visible from the position of the `ref`
   container in document order.
+- **Unqualified field references inside a def.** An expression authored inside
+  a def body (e.g. a `bytes.n` of `{ kind: ref, field: len }` that sizes a value
+  by a preceding `len` field in the same def) uses the field's **bare id**.
+  After expansion, that bare id resolves to the **nearest preceding field of
+  that bare id in document order** — which, inside a single instantiation, is
+  the def's own sibling field, so a reusable TLV/length def works per
+  instantiation. The resolution is **not** statically scoped to the def: it is
+  the same nearest-preceding-bare-id rule used everywhere (§10.1). When two
+  instantiations of the same def appear in one body, an expression inside the
+  second instantiation resolves a bare id to that instantiation's own field
+  (the most recent preceding one), not the first instantiation's. If an
+  instantiation must reference a specific other field across instantiations,
+  use the fully-qualified `{ref.id}.{field.id}` form; a bare id always binds to
+  the nearest preceding occurrence. (The §6 ASN.1 example relies on exactly
+  this: `len` inside `asn1Value` sizes the per-instance `value` because `len`
+  is the nearest preceding `len` within that instantiation.)
 - Constraints are document-level only and cannot be scoped to a single `def`
   instantiation. To express per-instantiation invariants, add them as
   document-level constraints referencing the expanded instantiation ids.
@@ -1389,6 +1929,20 @@ When a `def` has `recursive: true`, it may contain `ref` containers pointing
 to itself (directly) or to another `recursive: true` def (transitive recursive
 link through recursive defs only). The decoder is responsible for enforcing a
 reasonable depth limit; the PSDL validator does not impose one.
+
+**Progress and termination.** Every recursive descent **SHOULD consume at least
+one bit** of wire on the path to its self-reference (a length, tag, or
+discriminator read before the recursive `ref`), so the recursion is bounded by
+the finite packet length. PSDL does not statically verify this progress
+property — a def that recurses without consuming any bits is structurally valid
+but will not terminate on real input, and is an authoring error. Because the
+guarantee is dynamic, a static tool (layout/normalize/LSP) that expands a
+recursive def for preview **MUST** bound its own expansion: with no
+decoder-injected iteration counts the expansion yields **zero** recursive
+instances (the `eos`/`until` repeat default of §10.7), so static preview never
+descends infinitely. When a decoder reaches its depth limit at decode time, it
+**SHOULD** stop descending and treat the over-deep region as opaque `bytes`
+(emitting a diagnostic), rather than erroring out the whole parse.
 
 ```yaml
 defs:
@@ -1502,6 +2056,25 @@ user-supplied set of PSDL files, or a combination. Cross-registry name
 collisions are resolved by the tool layer (e.g. by namespace prefix or
 explicit override); PSDL does not define a conflict-resolution policy.
 
+**Resolution priority within one packet set.** Within a single packet set (§1),
+`name` is unique by rule, but a `meta.aliases` value carries no uniqueness
+guarantee. When a `next` value (or a deep-link target) could resolve to more
+than one document, the priority is: (1) a document whose **`name`** equals the
+value wins over any document for which it is only an **alias**; (2) if it
+matches no `name` and is an alias of two or more documents, the resolution is
+ambiguous and the tool SHOULD emit a warning and MAY pick deterministically
+(e.g. by load order) — PSDL does not mandate which alias-holder wins, only that
+a `name` outranks an alias. This is why §1 asks tools to warn when one
+document's alias equals another document's `name` (the alias is shadowed) or two
+documents share an alias (an ambiguous target): the warning surfaces a
+resolution that the `name`-over-alias rule will silently disambiguate or leave
+order-dependent.
+
+A document whose `body` is the empty array (`body.length === 0`) is a def
+library (§1.2) and MUST NOT be included as a candidate for `next` / alias
+resolution. To represent a real protocol with zero fields while keeping
+registry visibility, place at least one container in `body` (§1.2).
+
 The `_` key is valid in `next` maps and means 'unconditionally link to this
 protocol regardless of the field value'. It is the canonical way to model a
 payload that is always the same protocol regardless of any discriminator.
@@ -1532,6 +2105,33 @@ region is located as follows:
   `protocol`, an `int`), the payload is the region beginning at the field
   marked `category: payload-marker` (§5.1); absent any `payload-marker` field,
   it is all bytes remaining in the enclosing scope after the last body field.
+  The payload region **ends** at the end of the enclosing scope (the nearest
+  scope-providing container, §4) — i.e. it runs to the scope/packet end, not
+  merely to the end of the marker field. A trailer that is part of the current
+  protocol (not the handed-off payload) must therefore be modelled as explicit
+  end-anchored fields (§5) so it is not swept into the payload region.
+
+**Dispatch semantics of the `next` map.** `next` is metadata only (the
+reference validator imposes no checks on it; resolution is the tool layer's
+concern), but for interoperable tools its keys follow the **same grammar as
+`switch` case keys** (§5): a decimal string is an exact value, `"lo-hi"` an
+inclusive range, `"a,b,c"` a value list, and `"_"` the catch-all. Matching uses
+the same precedence (exact → list → range → `"_"`). When the discriminator
+value matches no key and no `"_"` is present, **no handoff occurs** and the
+payload region is left as raw bytes of the current protocol. When a key
+resolves to a target `name` the tool cannot find in its active packet set, the
+tool SHOULD fall back to rendering the payload as raw bytes and MAY emit a
+warning; an unresolved target is **not** a validation error of this document
+(the target lives in another document).
+
+**Multiplicity.** PSDL 0.5 does not restrict how many fields carry a `next` map
+or how many fields are `category: payload-marker`, and the reference validator
+flags neither. When more than one of either exists, the correspondence between a
+given `next` map and a payload region is left to the tool layer and is **not
+guaranteed deterministic** across tools; authors SHOULD therefore declare at
+most one `next` map and at most one `payload-marker` per document so the handoff
+is unambiguous. A document needing two genuinely distinct handoff points is
+outside the single-payload model this version targets (§16).
 
 **Discriminator expression (GENEVE / conditional linking):**
 
@@ -1582,6 +2182,34 @@ serialize after the covered fields are encoded (the authored/wire value is
 ignored for output), analogous to the `computedFrom` contract for length
 fields (§4).
 
+**Self-coverage (compute the field as zero).** When the checksum field's own id
+(or a container that expands to include it) appears in its `checksumCovers`, the
+field is fed into the computation **as all-zero bits of its declared width**,
+not with its authored/wire value. This is required for algorithms where the
+checksum field's contribution does not cancel out: e.g. **SCTP** (RFC 4960 §6.8)
+computes CRC32c over the **whole packet with the 4-byte checksum field set to
+zero**, so `checksumCovers: [commonHeader, chunks]` (where `commonHeader`
+includes the `checksum` field) is computed with those 4 bytes zeroed. For a
+one's-complement `internet` sum the zeroing is value-neutral (adding zero leaves
+the sum unchanged), which is why IPv4/TCP examples that list the checksum field
+work either way; for CRC algorithms excluding the field's bytes entirely would
+give a different result, so the zero-substitution rule — not field exclusion —
+is the defined behaviour.
+
+**Input stream construction.** The bytes fed to the algorithm are the wire
+encoding of the covered elements, concatenated in the **order the ids appear in
+`checksumCovers`** (not body/document order), after the container shorthands of
+that list are expanded (ref → its leaf fields in def order; repeat → all
+iterations in parse order, §"`checksumCovers` shorthand" below) and any
+self-covered checksum field is zeroed. A `checksumPseudoHeader` (if present) is
+prepended to this stream. Covered fields are concatenated at the **bit level**
+in coverage order and the resulting bit string is the algorithm input; when that
+bit string is not a whole number of bytes, the codec pads the **final** byte
+with zero bits on the least-significant side to a byte boundary before running a
+byte-oriented algorithm. Authors SHOULD ensure a checksum covers a
+whole-byte-aligned region (the standard case); sub-byte coverage is defined but
+unusual.
+
 ### Algorithms
 
 | Value | Description |
@@ -1617,11 +2245,12 @@ parameterized without a custom algorithm name:
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `polynomial` | integer | Generator polynomial (normal / non-reflected form) |
-| `initValue` | integer | Initial register value |
-| `finalXOR` | integer | Value XORed with the final CRC |
+| `polynomial` | integer or 0x hex string | Generator polynomial (normal / non-reflected form) |
+| `initValue` | integer or 0x hex string | Initial register value |
+| `finalXOR` | integer or 0x hex string | Value XORed with the final CRC |
 | `inputReflect` | boolean | Reflect each input byte before processing |
 | `outputReflect` | boolean | Reflect the final CRC before XOR |
+| `width` | integer (1–64) | CRC width in bits; optional (see **Width** below) |
 
 All `checksumParams` fields are optional. Named algorithms have well-known
 implied parameters; `checksumParams` overrides them when present. Tools
@@ -1634,6 +2263,48 @@ Using `checksumParams` with a named algorithm that does not use a CRC
 parameter model (`internet`, `adler32`) is a validation error. These
 algorithms have fixed internal parameters that are structurally incompatible
 with the CRC parameter set.
+
+#### Width
+
+The CRC width equals the checksum value field's **declared bit width**
+(`int.bits` / `bits.n` / `enum.bits`) — the same "declared width" used by the self-coverage
+rule above. The optional `checksumParams.width` (1–64) overrides this for the
+rare case where the declared and effective widths differ. A checksum field whose
+type has **no single declared bit width** — a `bytes` checksum — **requires** an
+explicit `width`: it cannot be derived, so omitting it is a validation error.
+
+#### Integer precision
+
+`polynomial`, `initValue`, and `finalXOR` may each be a bare integer **or** a
+`0x`-prefixed hex string matching `^0x[0-9A-Fa-f]+$`. A value at or below
+`2^53−1` may be written as a bare integer. A value that needs more than 53 bits
+(e.g. the CRC-64/ECMA-182 polynomial `0xAD93D23594C935A9`) **MUST** be written
+as a hex string: a bare JSON/YAML integer above `2^53−1` loses precision in an
+IEEE-754 double and would corrupt codegen. Tools MUST preserve hex-string params
+at full 64-bit precision (BigInt or equivalent). This is a two-layer contract:
+the JSON Schema accepts any non-negative integer, but the **validator** rejects a
+bare integer above `2^53−1` and directs the author to the hex-string form —
+schema acceptance is therefore *not* the same as validity here.
+
+```yaml
+- id: crc
+  name: CRC-64
+  type: { kind: int, bits: 64 }      # width derived from int.bits = 64
+  category: checksum
+  checksumAlgorithm: crc64-ecma182
+  checksumCovers: [data]
+  checksumParams:
+    polynomial: "0xAD93D23594C935A9"  # > 2^53−1 → hex string (bit-exact)
+    initValue:  "0xFFFFFFFFFFFFFFFF"
+    finalXOR:   "0xFFFFFFFFFFFFFFFF"
+    inputReflect:  true
+    outputReflect: true
+```
+
+A `checksumParams` block with no `checksumAlgorithm` is still subject to the
+width rule above (a `bytes`-typed checksum field with params but no `width` is a
+validation error); the non-CRC-algorithm exclusion only fires when a
+`checksumAlgorithm` naming `internet`/`adler32` is present.
 
 ### `checksumCovers` shorthand
 
@@ -1706,6 +2377,18 @@ serialize/deserialize time.
 Constraints express equality relationships evaluated independently of body
 parsing. They may reference any field regardless of document position.
 
+A constraint is exactly an **`lhs == rhs` equality**; PSDL 0.5 has no
+inequality constraint form. RFC "MUST" rules phrased as inequalities (`ihl >=
+5`, `ttl > 0`, `totalLength <= 65535`) **cannot** be authored as
+`constraints` — this is a recorded limitation of the current version, not an
+oversight to be worked around with a new key. (A comparison **operator**
+(`>=`, `<`, …) may still appear *inside* an `lhs`/`rhs` expression, where it
+yields `0`/`1`, e.g. `lhs: (ihl >= 5)`, `rhs: 1`; but that is an equality whose
+sides happen to contain a comparison, evaluated only for the validation
+diagnostic — the single-unknown linear solver (§9.1) does not invert a
+comparison, so such a constraint never back-propagates a value. A range-check
+RFC rule is otherwise left to the codec/lint layer.)
+
 ```yaml
 constraints:
   - lhs: { kind: ref, field: totalLength }
@@ -1726,8 +2409,16 @@ constraints:
   back-propagation (see §6 Recursive defs — Limitations). Tools SHOULD emit
   a lint warning at load time when such a constraint is detected.
 - Constraint equality is checked after all present fields have been parsed.
-  A mismatch produces a **validation warning** (not a hard error) to allow
-  lenient parsing of malformed packets.
+  The severity of a mismatch is governed by the constraint's `level` (§9.1): a
+  **`must`** (or level-less) mismatch is a **hard conflict** (the solver surfaces
+  it as `conflict` and `validateConstraints` reports it as a `must`-level
+  diagnostic), while a **`should`**/**`may`** mismatch is a non-fatal advisory
+  (warning / informational) that never blocks parsing. Wire parsing itself is
+  still lenient — a constraint mismatch never changes a wire-parsed field value
+  and never aborts the Parse phase; the "hard conflict" is a back-propagation /
+  validation result, reported after parsing, not a parse-time abort. (Earlier
+  drafts described every mismatch as a plain "validation warning"; the
+  authoritative rule is the level-governed behaviour of §9.1.)
 - Codec back-propagation: given one side's value, solve for unknown fields on
   the other side. Only **single-unknown linear** expressions can be
   auto-solved; multi-unknown or non-linear constraints are used for validation
@@ -1735,6 +2426,50 @@ constraints:
 - Back-propagation MUST be **fixpoint-iterated**: the solver re-runs the full
   constraint list until no new fields are resolved in a pass. A single pass
   is insufficient when constraint A resolves field X, enabling constraint B.
+
+### 9.1 Normative levels and the solver
+
+A constraint MAY carry `level: must | should | may`. **Absent ≡ `must`**,
+preserving legacy 0.5 behaviour.
+
+Only `must` constraints (including level-less ones) participate in
+back-propagation: the fixpoint solver (`propagateFixpoint`, §9) may use them to
+resolve unknown field values. `should` and `may` constraints are
+**diagnostic-only**: they are never used to derive a field value, and a
+mismatch is reported as a lint/validation advisory whose severity follows the
+level (`should` → warning, `may` → informational). This guarantees that
+relaxing a constraint to `should`/`may` can never change any wire-parsed field
+value; it can additionally drop solver-derived values and the hard-failure
+detection that the `must` constraint was providing, in exchange for a
+level-tagged diagnostic. The rule is enforced structurally in the solver:
+`should`/`may` are skipped in `propagate` (back-propagation) and evaluated for
+diagnostics only, in `validateConstraints`. Every failing constraint — `must`
+included — is reported as an indexed diagnostic, so tooling can map each
+violation back to its source constraint; the hard `conflict` is derived from
+the first failing `must` in declaration order. A solver conflict
+(`propagate`/`propagateFixpoint`) likewise SHOULD identify the conflicting
+constraint by index and MAY expose the partially-propagated environment at the
+moment of conflict, so tooling can reproduce the conflict (e.g. by re-running
+`validateConstraints` over that environment) and attach it to a source range.
+
+The same `must`/`should`/`may` vocabulary applies to value-dictionary entries
+(§5.3) and enum variants (§3), where it expresses the normative strength of a
+particular value rather than a relationship; value-entry `level` defaults to
+`may` and never feeds the solver.
+
+A value-entry `level` is a **presentational annotation about how the RFC treats
+that observed value** — the strength with which the standard requires this
+value's interpretation or its implementation support — **not** an operational
+predicate the tooling acts on. It produces **no diagnostic**: a tool does not
+warn, error, or back-propagate from it. Its only use is **rendering emphasis**
+(e.g. an LSP hover or a packet view styling a `must` codepoint more prominently
+than a `may` one). It deliberately does not distinguish "must send this value",
+"must apply this interpretation on receipt", and "must implement support for
+this codepoint"; PSDL records only the single normative-strength tag and leaves
+that finer reading to documentation, because acting on it would require
+send/receive/role context a single packet schema does not carry. This keeps the
+value-entry `level` side-effect-free in the reference implementation, matching
+the solver-exclusion above.
 
 ---
 
@@ -1793,6 +2528,32 @@ which is evaluated when the encrypted container is entered during parse;
 rule** — every field referenced by that `wireBits` expression must precede the
 `encrypted` container in document order. `constraints` expressions are fully
 exempt from this rule.
+
+Beyond document order, every body/`constraints` `ref`/`wireSize` target must
+also **exist** somewhere in the document (§2): a target naming nothing declared
+is a validation error, and a `#N` repeat-indexed form may not appear in an
+expression. The forward-order rule additionally rejects a field that refers to
+**itself** (a self-size `ref`, or an `optional.when` referencing its own
+container) because the target does not yet precede the expression. This does
+**not** reject the canonical "present-bitmap extension chain" idiom (Radiotap
+RFC, the IEEE 802.11 radiotap `it_present` words): there each `optional.when`
+references the **previous, already-closed** present word (`present0`,
+`present1`, …), not its own container, so every reference resolves to a
+preceding declaration.
+
+Within a `repeat.count` or `repeat.count.until` expression, an ordinary `ref`
+to a field of the **same repeat's element** is **exempt** from the
+forward-reference rule: such a `ref` resolves to that field's value in the
+**just-completed iteration** (§10.7), so it is a backward reference into the
+iteration that has already been parsed, not a forward reference. The repeat
+container's **own** `id` (a self-size ref to the repeat) and any **non-element
+sibling** declared later in document order remain **subject** to the
+forward-reference rule — the exemption covers only fields of that repeat's
+element. (Concretely, the §5 sentinel example whose `count.until` compares an
+element field `labelLen` against `0`, and the `tsn != prevIter(tsn) + 1` idiom
+of §4, both rely on this exemption.) Such a `ref` MUST use the element field's
+**bare** id (`tsn`), the nearest-preceding form used everywhere in §10.1 — the
+repeat-prefixed dotted form (`items.tsn`) is not the supported idiom here.
 
 ### 10.2 Default value seeding
 
@@ -1884,11 +2645,61 @@ If this key is absent (e.g. during static layout preview), the **normalize**
 phase defaults to `0` iterations. Tools that stream-decode loop until
 end-of-stream is detected and then inject the count.
 
-The decoder/codec **MUST** also populate `env[repeat.id]` for **fixed-count**
+**Seed-phase timing, reconciled.** An `eos` (or `until`) iteration count is by
+nature only known *after* the stream is consumed, which appears to contradict
+the §10.0 rule that "all seeding happens before any parsing." The reconciliation
+is that the count is a **decoder-supplied input to the model's seed phase**, not
+a value the model computes during its own parse: a streaming decoder runs its
+own read loop to end-of-stream first, *then* presents the resulting count to
+PSDL's four-phase model as a seed input (exactly as it presents the top-level
+packet bit count). From the model's point of view the value is already known at
+seed time; from the decoder's point of view it was discovered by an earlier,
+decoder-internal pass. Static tools that have no decoder pass simply omit the
+key and get the `0`-iteration default. This is the same injection contract as
+`enclosingBits` at the top-level body.
+
+**Per-instance keys for nested / ref-expanded repeats.** A bare `repeat.id` is
+insufficient when a repeat is reached more than once — nested inside an outer
+repeat, or expanded from a `ref` instantiated multiple times — because each
+runtime instance has a **different** iteration count. The key is therefore the
+repeat's **fully-qualified id**: the ref-prefix path plus the repeat id plus the
+repeat-index suffix, `{prefix}.{id}#N`, with multi-level nesting joining the
+indices with `_` (`#0_1` = outer iteration 0, inner iteration 1), matching the
+expanded-id scheme of §6. The decoder injects the count under this qualified key
+for each instance; a lookup falls back to the bare `repeat.id` only when no
+qualified entry exists (the single-instance case). The same qualified key backs
+a `ref` to the repeat id (§4) so it resolves to the count of the instance in
+scope, not a leaked sibling count.
+
+The decoder/codec **MUST** also populate this key for **fixed-count**
 repeats (it trivially equals the evaluated `count` expression). This makes a
 `ref` to a repeat container's `id` (§4) yield the completed iteration count
 uniformly for both `eos` and fixed-count repeats, so a count field can
 back-propagate via a constraint `countField == <repeatId>`.
+
+**Delimiter-terminated `bytes` length (`delimiter`).** A delimiter-terminated
+`bytes` field (§3) follows the same injection contract: the decoder scans
+forward to the delimiter, then injects the resulting byte length (delimiter
+included) into the env during the seed phase under a **dedicated, namespaced
+key** keyed by the field's fully-qualified id — distinct from `env[id]` (the
+field's value slot) and from every other injection key, so the two never
+collide. With no injection (static layout preview) the field's length is
+**unknown** and the normalize phase lays it out as `0` bytes; a static
+LSP/renderer should present it as a delimiter-terminated variable field of
+indeterminate length rather than claim a concrete size.
+
+The forward delimiter scan **MUST** be bounded by the nearest enclosing
+scope-providing container with a defined budget: when the field is inside a
+`bounded` scope or an `encrypted.plaintext`, a delimiter not found within that
+scope's remaining budget — equivalently, an injected delimiter length that
+pushes the cursor past the scope's `bytes`/`wireBits` budget — is a
+truncated-capture runtime error (§11.2), the same over-consume rule §5 already
+mandates for those scopes. For a top-level delimiter-terminated field with no
+such enclosing budgeted scope, a decoder that reaches the injected end of
+available data without finding the delimiter SHOULD likewise treat the field as
+a truncated capture (§11.2). The `delimiter` byte-sequence terminator is
+unrelated to the `repeat.count.until` after-iteration predicate (§5); the two
+share no keyword.
 
 ### 10.8 Nested optional evaluation
 
@@ -1905,6 +2716,14 @@ When an `optional` is nested inside another `optional`:
 This section defines the expected behavior for every exceptional condition.
 Tools SHOULD follow these classifications; deviation must be documented.
 
+**No machine-readable error codes (this version).** PSDL 0.5 does not assign a
+stable machine-readable code to each condition; a condition is identified by its
+**section number plus the table row text** in §11.1–§11.4. Consumers that need a
+diagnostic identifier (an LSP `Diagnostic.code`, per-rule suppression, i18n, or a
+"deviation must be documented" conformance statement) MUST map these rows to
+their own code namespace; a normative code scheme is a candidate for a future
+revision, not part of 0.5.
+
 ### 11.1 Validation errors (caught at load/parse time)
 
 | Condition | Error |
@@ -1912,17 +2731,30 @@ Tools SHOULD follow these classifications; deviation must be documented.
 | Missing required field (`name`, `body`, etc.) | Validation error |
 | Field id does not match `[a-zA-Z][a-zA-Z0-9_-]*` | Validation error |
 | Field id contains `.` | Validation error |
+| Two declarations produce the same **expanded id** and can be live in the `env` at the same time (i.e. not in different arms of one `switch`) (§2) | Validation error |
+| A body or `constraints` expression `ref` / `wireSize` target is not declared anywhere in the document (§2) | Validation error |
+| A body or `constraints` expression `ref.field` contains `#` (a repeat-indexed instance is not referenceable, §10.4) | Validation error |
 | `ref` target not found in `defs` or imports | Validation error |
 | Circular reference in `defs` through a non-`recursive` path | Validation error |
 | `peek` used outside `switch.on` / `optional.when` / `repeat.count` (including `.until`) — e.g. in `bytes.n`, `encrypted.wireBits`, or `constraints` | Validation error |
+| `peek` `bits` is not an integer in the range `1`–`64` | Validation error |
 | `enclosingBits` used outside a scope-providing container that carries an injected bit budget (i.e. outside an `encrypted.plaintext` struct or the top-level `body`) | Validation error |
 | `remaining`/`enclosingBits` used inside an `encrypted.plaintext` whose `encrypted` container omits `wireBits` | Validation error |
 | `prevIter` used outside `repeat.count.until` | Validation error |
 | `enclosingField` used in a body expression (not in `constraints`) | Validation error |
 | `switch` case key has invalid format | Validation error |
 | `berLength.maxBytes` > 5 | Validation error |
+| `bytes.n` `delimiter` is an empty array (§3) | Validation error |
+| `bytes.n` `delimiter` has an element outside `0`–`255` (§3) | Validation error |
 | `remaining` used outside a scope-providing container (a `bounded` scope, `encrypted.plaintext` struct, or the top-level `body`) | Validation error |
 | `checksumParams` used with a non-CRC named algorithm (`internet`, `adler32`) | Validation error |
+| A `headerProtected` id resolves to neither a plaintext field of its `encrypted` container nor a field declared earlier in the same body (§5) | Validation error |
+| `checksumParams` `polynomial`/`initValue`/`finalXOR` is a bare integer above `2^53−1` (write it as a `^0x[0-9A-Fa-f]+$` hex string) (§8) | Validation error |
+| `checksumParams` `polynomial`/`initValue`/`finalXOR` hex string does not match `^0x[0-9A-Fa-f]+$` (§8) | Validation error |
+| `checksumParams` on a field whose type has no single declared bit width (e.g. `bytes`) without an explicit `width` (§8) | Validation error |
+| `subfields` on a field that is not an `int` or a byte-aligned `bits` field (§12) | Validation error |
+| A `subfields` `mask` does not fit within the field's declared bit width (`mask ≥ 2^bits`) (§12) | Validation error |
+| A `subfields` `mask` is neither a non-negative integer nor a `^0x[0-9A-Fa-f]+$` hex string (§12) | Validation error |
 | Field id appears in more than one `rendererHints.sections` entry | Validation error |
 | `rendererHints.sections` entry has an empty `fields` list | Validation error |
 | `rendererHints.sections.fields` entry does not correspond to any top-level body container or field id | Validation error |
@@ -1938,8 +2770,17 @@ Tools SHOULD follow these classifications; deviation must be documented.
 | `wireSize` in a body expression references a `target` that appears after the `wireSize` expression in document order | Validation error |
 | `wireSize` in a body expression targets an enclosing/not-yet-closed (still open on the parse stack) container | Validation error |
 | `ref` to a repeat container's `id` in a body expression that precedes that repeat in document order | Validation error |
+| A body expression `ref` target appears after the `ref` expression in document order, or refers to its own container (a self-size `ref`, e.g. a field whose `bytes.n` references its own id) (§10.1). **Exempt:** a `repeat.count`/`repeat.count.until` `ref` to a field of the same repeat's element, which resolves to the just-completed iteration (§10.7). | Validation error |
 | `computedFrom` set to any expression other than `wireSize` | Validation error |
 | `virtual` field placed inside a `defs` struct body | Validation error |
+| A `values` entry sets none, or more than one, of `value` / `range` / `pattern` (§5.3) | Validation error |
+| A `values` entry `pattern` is empty or contains a character other than `0`, `1`, `x`/`X` (§5.3) | Validation error |
+| A `values` entry `range` is not a two-integer `[min, max]` with `min ≤ max` (§5.3) | Validation error |
+| A `values` entry `name`/`label`/`doc`, an enum variant object `label`/`doc`, or a constraint `doc` is not a string | Validation error |
+| A `values` entry, enum variant object, constraint, or `meta` object carries an unknown key | Validation error |
+| A `level` (on a constraint, `values` entry, or enum variant) is not `must`, `should`, or `may` (§9.1) | Validation error |
+| `meta.rfc` is neither an integer nor `{ defined, updates? }` where each `updates` entry is an integer or `{ rfc, section? }` (§5.4) | Validation error |
+| `category` is a token outside the closed nine-token set (§5.1) | Validation error |
 
 ### 11.2 Runtime errors (during normalization/decode with known values)
 
@@ -1952,6 +2793,9 @@ Tools SHOULD follow these classifications; deviation must be documented.
 | `remaining` or `enclosingBits` used in a top-level `body` expression when the decoder has not injected the total packet size | Runtime error |
 | `align` whose computed padding exceeds the remaining byte budget of the enclosing `bounded` scope | Runtime error |
 | `remaining` used to size a `bytes` field while the cursor is mid-byte (not byte-aligned) | Runtime error |
+| A `bounded` scope's contents consume more bits than its `bytes` budget (over-read past the declared boundary, §5) | Runtime error |
+| An `encrypted.plaintext`'s contents consume more bits than the `wireBits` budget (over-read past the declared boundary, §5) | Runtime error |
+| A fixed-width field, `bytes.n` (including its delimiter-terminated `delimiter` form, whose delimiter is not found before the injected end of available data, §10.7), or `align` read runs past the decoder-injected end of available data (truncated capture, §5/§10.0/§10.7) | Runtime error |
 
 ### 11.3 Silent / fallback behavior
 
@@ -1962,12 +2806,16 @@ Tools SHOULD follow these classifications; deviation must be documented.
 | `enum` value not in `variants` | Accept as raw integer; no label displayed |
 | `varint` overflow | Decoder-defined (truncate or error) |
 | Constraint references absent field | Constraint silently skipped |
-| Constraint value mismatch | Validation warning (not hard error) |
+| Constraint value mismatch (`should`/`may` level) | Validation advisory (warning / informational); parsing continues |
+| Constraint value mismatch (`must` / level-less) | Hard conflict reported after parsing (§9.1); parsing itself is not aborted |
 | `peek` reads past available data | Yields `0` |
 | `eos` repeat with no env injection | Zero iterations |
 | `lookup` key not found in table | Yields `0` |
 | `lookup` key expression truncates to a negative integer | Yields `0` (no key can match; same as key-not-found) |
 | Constraint references a field inside a recursive def expansion | Constraint silently skipped at evaluation and back-propagation |
+| `bytes.n` expression evaluates to a negative byte count | Clamped to `0` (the field occupies zero bytes) |
+| `bounded`/`encrypted.plaintext` contents under-read the budget (consume fewer bits than declared) | Cursor snapped forward to the scope/`wireBits` end; unconsumed bytes skipped (§5) |
+| `count: eos` repeat where the scope budget is exhausted, or the remaining budget is non-zero but smaller than the next element's minimum size | Repeat terminates (no further iteration is started) |
 
 ### 11.4 Lint warnings (load-time advisory, not hard errors)
 
@@ -1976,6 +2824,8 @@ Tools SHOULD follow these classifications; deviation must be documented.
 | `version` absent from document | Warn that version is undeclared |
 | Constraint `lhs` or `rhs` references a field inside a recursive def expansion | Lint warning: constraint will always be silently skipped |
 | `checksumParams` used with a well-known named CRC algorithm (`crc32`, `crc32c`, `crc16`) | Advisory: the override changes the effective algorithm; consider using a custom algorithm name instead |
+| Two `subfields` masks overlap, or a subfield `mask` is `0` (§12) | Advisory: subfield masks should be non-overlapping and non-zero |
+| A multi-subfield bit run sits under `byteOrder: LE`; consider expressing it with `int` + `subfields` (masks over the decoded value) rather than a sequential MSB-first bits-group (§12) | Advisory: a sequential bits-group mis-packs LSB-first LE words |
 
 ---
 
@@ -2030,6 +2880,77 @@ body:
     name: Flags
     type: { kind: bits, n: 16 }        # follows packet-level BE; no per-field override
 ```
+
+### LSB-first / little-endian word subfields (`subfields`)
+
+A naive `bits` decomposition cannot express **LSB-first** bit packing inside a
+little-endian word: the byte-order swap reorders bytes, so a sequential
+MSB-first bits-group lands on the wrong bits (802.15.4 / 802.11 Frame Control,
+CAN-Intel signals). The canonical form is an `int` (or a **byte-aligned** `bits`)
+field carrying a `subfields` array whose **masks are read over the decoded
+value**, with **bit 0 = the least-significant bit** — identical to
+`ValueEntry.pattern`'s bit-0=LSB convention (§5.3). Each subfield's decoded value
+is `(fieldValue & mask) >> lowestSetBit(mask)`. Because the convention is defined
+over the **byte-order-resolved decoded value**, it is byte-order-independent and
+works identically for LE and BE words — which is exactly why it succeeds where
+the MSB-first bits-group fails.
+
+`subfields` is permitted only on an `int` field or a **byte-aligned** `bits`
+field (`n` a multiple of 8); on any other type it is a validation error. Each
+`mask` must be a non-negative integer (or a `^0x[0-9A-Fa-f]+$` hex string for
+masks wider than 53 bits, decoded at full 64-bit precision per the §8 precedent)
+and must fit within the parent's declared bit width (`mask < 2^bits`, else a
+validation error). Overlapping or zero masks are a §11.4 **lint** warning, not an
+error (real Frame Control fields are non-overlapping, but tools should not
+hard-fail). Subfields are **display/annotation only**: they consume no wire bits,
+add no parse semantics, do not appear in `env`, and do not affect
+`checksumCovers`, expressions, or scoping. Their `values`/`meta`/`level`/
+`category` ride through to the normalized output (`NormalizedField.subfields`)
+for LSP hover and codegen. They are exposed via `NormalizedField.subfields`
+**only**; because exact wire-render placement is not guaranteed in 0.5 (above),
+mask-addressed subfields are intentionally **absent from `ResolvedLayout`** — a
+renderer that needs subfield value-decode reads them from the normalized output,
+not from layout cells.
+
+A field **MAY** carry both a whole-field `values` dictionary (§5.3) and
+`subfields`; the two are independent, non-exclusive annotation layers and are
+**not** a conflict. A whole-field `values` entry is a reverse-lookup over the
+field's entire decoded value; each subfield's `values` annotates only that
+subfield's masked sub-value `(fieldValue & mask) >> lowestSetBit(mask)`. A tool
+**MAY** surface both (the whole-value meaning and the per-subfield meanings) —
+neither overrides the other, and neither carries wire semantics (§16.4).
+
+```yaml
+# IEEE 802.15.4 Frame Control, a little-endian 16-bit word (RFC-free; IEEE std).
+byteOrder: LE
+body:
+  - id: fcf
+    name: Frame Control
+    type: { kind: int, bits: 16 }
+    display: hex
+    subfields:
+      - { id: frameType,    name: Frame Type,         mask: 0x0007, category: type,
+          values: [ { value: 1, label: Data }, { value: 2, label: Ack } ] }
+      - { id: secEnabled,   name: Security Enabled,    mask: 0x0008, category: flags }
+      - { id: framePending, name: Frame Pending,       mask: 0x0010, category: flags }
+      - { id: ackReq,       name: Ack Request,         mask: 0x0020, category: flags }
+      - { id: panIdComp,    name: PAN ID Compression,  mask: 0x0040, category: flags }
+      - { id: reserved,     name: Reserved,            mask: 0x0380, category: reserved }
+      - { id: destAddrMode, name: Dest Addr Mode,      mask: 0x0C00, category: type }
+      - { id: frameVersion, name: Frame Version,       mask: 0x3000, category: identifier }
+      - { id: srcAddrMode,  name: Src Addr Mode,       mask: 0xC000, category: type }
+```
+
+> **Render position (this version).** `subfields` carry **value-decode**
+> semantics (the decoded sub-value, its `values` dictionary, and its `category`)
+> for LSP hover and codegen. The mapping from a subfield's value bit range to a
+> concrete **wire render position** — which for a little-endian word is
+> generally **non-contiguous** after the byte swap — is **not guaranteed by
+> 0.5**: a renderer MAY derive sub-cell positions from the masks, but exact
+> sub-cell placement (and the non-contiguous LE case in particular) is a
+> candidate for a follow-up revision. This keeps 0.5's one-document,
+> one-interpretation guarantee (§16.4) intact for the value-decode layer while
+> deferring the render-geometry layer.
 
 ---
 
@@ -2152,6 +3073,16 @@ group instead of a hex dump:
 `display` is **display-only** and carries no wire semantics; for `bytes` it
 does not affect parsing or round-tripping.
 
+> **Design note (value reinterpretation).** A future minor (0.6) that adds
+> float/fixed/BCD value decoding SHOULD NOT overload the `display` string enum.
+> It SHOULD add a separate optional structured property whose shape can be
+> validated against the field's declared bit width, e.g.
+> `valueType: { kind: float }` or
+> `valueType: { kind: fixed, intBits: 16, fracBits: 16, signed?: true }`,
+> keeping `display` a pure base/format hint. Consuming such decoded values from
+> normalized output additionally requires propagating `display`/`valueType`
+> onto `NormalizedField` at that time.
+
 ---
 
 ## 15. Version compatibility
@@ -2214,23 +3145,62 @@ The dividing line is precise: **a constant end-offset is expressible** (place
 ordinary fields after a `remaining − <const>` data field); **a value-dependent
 back-off, a backward scan, or a random-access jump is not.**
 
-### 16.2 The cross-context-state family
+### 16.2 The cross-context-state / accumulated-state family
 
-A second family requires state established **outside the current packet** (or in
-a previously-parsed part of a session) to choose the layout of a later region:
+A second family needs **runtime-accumulated state that PSDL's static,
+forward-only, single-pass model does not thread through** — to choose the layout
+of a later region or to reconstruct a value. The state may live **outside the
+current packet** (session/connection context) **or** be **accumulated within the
+packet** as parsing proceeds; the common obstruction is that no PSDL primitive
+carries a running, parse-time-built table or counter from an earlier region into
+a later one. To classify a new pattern, ask: *does correctly interpreting a
+later region require a value or table that is built up while parsing rather than
+read from a single discriminator field?* If yes, it is in this family and out of
+scope. The members span both the cross-packet and intra-packet ends of that
+criterion:
 
-- **MP-BGP / BGP-4 `AS_PATH`** — whether AS numbers are 2 or 4 bytes wide is
-  negotiated by the 4-octet-AS capability in an earlier OPEN message
-  (RFC 6793), not carried in the UPDATE.
-- **IPFIX / NetFlow v9 data records** — field layout comes from a Template
-  Record (even when the template rides in the same packet, the data record is
-  not self-describing).
-- **Delta-coded accumulators** — e.g. a CoAP option's absolute number is the
-  running sum of all prior option deltas; there is no fold/accumulator
-  primitive (§4 `prevIter` exposes only the most-recent iteration).
+- **MP-BGP / BGP-4 `AS_PATH`** (cross-packet) — whether AS numbers are 2 or 4
+  bytes wide is negotiated by the 4-octet-AS capability in an earlier OPEN
+  message (RFC 6793), not carried in the UPDATE.
+- **IPFIX / NetFlow v9 data records** (same-packet or cross-packet) — field
+  layout comes from a Template Record; even when the template rides in the same
+  packet, turning the parsed template entries into the *structure* of the data
+  record requires runtime-built layout state the model cannot materialize (§3
+  template-defined record layouts).
+- **HTTP/2 HPACK dynamic table** (intra-block **and** connection state) — a
+  header field can be a back-reference into a dynamic table that earlier entries
+  in the *same* header block (and earlier blocks on the connection) appended to;
+  decoding a later index requires the running table built while parsing the
+  preceding entries. This is the most prominent member and is **explicitly out
+  of scope** — both its intra-block accumulation and its connection-lifetime
+  persistence put it squarely in this family.
+- **Delta-coded accumulators** (intra-packet) — e.g. a CoAP option's absolute
+  number is the running sum of all prior option deltas; there is no
+  fold/accumulator primitive (§4 `prevIter` exposes only the most-recent
+  iteration). Note the wire *structure* of each CoAP option is still
+  self-describing (§3 CoAP switch idiom); only the reconstructed absolute number
+  needs the accumulator, so this is a value-reconstruction member of the family,
+  not a structural-parse one.
 
 These are out of scope for the same root reason: a single PSDL document
-describes one self-describing packet type and has no session-state input.
+describes one self-describing packet type, parsed in one forward pass, with no
+session-state input and no parse-time accumulator that survives across regions.
+(The earlier wording "state established outside the current packet" named only
+the cross-packet end of this family; the criterion above is the intended one and
+covers the intra-packet accumulator members — CoAP deltas, HPACK intra-block
+indices — equally.)
+
+**Multi-field protocol dispatch.** A related current-version limitation: `next`
+(§7) dispatches on the **discrete values of a single field**. A protocol whose
+upper layer is chosen from a *combination* of fields — the canonical case being
+TCP→HTTP, where the application protocol is keyed on `srcPort` **OR** `dstPort`
+(either side may be the well-known port) — cannot be expressed, because `next`
+has no multi-field or OR-of-fields key form. The planned `when`-conditional
+linking sketch (§7, for GENEVE) is also single-condition and does not cover a
+two-field OR. This is recorded as a **constraint of the current version**, not a
+new construct to be added here; until a conditional-linking extension lands,
+such a handoff is annotated with `next: { _: <default> }` plus a `doc` note (§7)
+and resolved at the tool layer.
 
 ### 16.3 Why these are deferred, not denied
 
@@ -2254,3 +3224,26 @@ in decreasing order of how well it fits the current model:
 Until then, these patterns are a codec/tool-layer concern: the raw bytes are
 always representable (e.g. an RTP payload+padding as one `bytes` blob, an IPFIX
 data set as opaque bytes), only their *interpretation* is out of scope.
+
+### 16.4 One document, one interpretation
+
+A PSDL document describes **one canonical, present-day interpretation** of a
+packet. When a later RFC reinterprets the same bit range (e.g. the IPv4 ToS
+octet redefined as DSCP+ECN by RFC 2474/3168), the document MUST encode only the
+current consensus layout as structure; the historical interpretation is folded
+into provenance (`meta.rfc.updates`, §5.4) and per-value annotations (`values`,
+§5.3), not expressed as a parallel layout. Authors MUST NOT use `switch` /
+`optional` to carry multiple competing RFC interpretations of the same bits
+purely for historical record. The `switch` / `optional` containers remain an
+escape hatch only for the rare case where two interpretations are genuinely both
+live on the wire and selectable from packet content.
+
+**Enforcement level.** This `MUST NOT` is **authoring guidance, not a checked
+validation rule**. There is no row for it in the §11.1 validation-error table,
+and the reference validator does not detect it — "two competing historical
+interpretations" versus "two interpretations genuinely both live on the wire"
+has no operational test a validator can apply (both compile to identical
+`switch`/`optional` structure). A document that violates this guidance is
+therefore **accepted** by a conforming validator; the rule is enforced by review
+and by lint/style tooling that MAY emit a non-normative advisory, not by
+load-time rejection. Authors and reviewers are responsible for honouring it.

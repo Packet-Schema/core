@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { berLenEnvKey, normalize, selectArm, varintBitsEnvKey } from "../src/normalize.js";
+import { resolveLayout } from "../src/layout.js";
 import { peekEnvKey } from "../src/expr.js";
+import { resolveValueEntry } from "../src/values.js";
 import type { Packet, Struct } from "../src/types.js";
 
 describe("normalize — basic fields", () => {
@@ -131,6 +133,28 @@ describe("normalize — bounded scope + remaining", () => {
   });
 });
 
+// C8/§5/§11.2: the reference implementation's bounded-OVER-consumption runtime
+// error. (Under-consumption snap and the encrypted-wireBits cases are already
+// pinned in the "bounded under-consumption advances to scope end" and
+// "encrypted plaintext wireBits budget" describes below; this adds the missing
+// bounded over-read error that the spec §11.2 row now documents.)
+describe("normalize — bounded budget over-consumption (§5/§11.2, C8)", () => {
+  it("over-consumed bounded budget is a runtime error", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [
+        {
+          kind: "bounded",
+          id: "scope",
+          bytes: { kind: "lit", value: 2 },
+          fields: [{ id: "big", name: "B", type: { kind: "int", bits: 32 } }], // 4 > 2 bytes
+        },
+      ],
+    };
+    expect(() => normalize(pkt)).toThrow(/bounded scope "scope" over-consumed/);
+  });
+});
+
 describe("normalize — nested optional short-circuit", () => {
   it("skips inner optional when outer is absent", () => {
     const pkt: Packet = {
@@ -214,6 +238,33 @@ describe("normalize — encrypted", () => {
     const n = normalize(withWireBits, new Map(), { viewMode: "wire" });
     expect(n.fields[0]!.bits).toBe(40);
   });
+
+  it("the encrypted region's meta rides on the wire-view blob (§5.4)", () => {
+    const meta = { rfc: { defined: 9001, updates: [9999] }, section: "4" };
+    const withMeta: Packet = {
+      name: "t",
+      body: [
+        {
+          kind: "encrypted",
+          id: "payload",
+          doc: "enc region",
+          meta,
+          contextNote: "note",
+          plaintext: {
+            id: "pt",
+            fields: [{ id: "inE", name: "InE", type: { kind: "int", bits: 8 } }],
+          },
+        },
+      ],
+    };
+    const n = normalize(withMeta, new Map(), { viewMode: "wire" });
+    expect(n.fields).toHaveLength(1);
+    const blob = n.fields[0]!;
+    // doc and meta travel together on the same blob NormalizedField.
+    expect(blob.doc).toBe("enc region");
+    expect(blob.meta).toEqual(meta);
+    expect(blob.encrypted).toBe(true);
+  });
 });
 
 describe("normalize — align", () => {
@@ -250,6 +301,34 @@ describe("normalize — align", () => {
       ],
     };
     expect(() => normalize(pkt)).toThrow(/bounded scope/);
+  });
+
+  // C35/§5: the alignment reference point is the origin of THIS document's byte
+  // stream (offset 0 of the normalize call), not an enclosing scope's start nor a
+  // global capture buffer. An `align` inside a `bounded` scope therefore measures
+  // from the document origin: starting at bit offset 20 (not a multiple of 32),
+  // `align to: 32` lands on absolute offset 32, regardless of where the bounded
+  // scope began.
+  it("aligns to the document origin even inside a bounded scope (C35)", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [
+        { id: "pre", name: "Pre", type: { kind: "int", bits: 20 } }, // origin 0..20
+        {
+          kind: "bounded",
+          id: "scope",
+          bytes: { kind: "lit", value: 8 },
+          fields: [
+            { kind: "align", to: 32 }, // 20 -> 32 (measured from document origin, not scope start)
+            { id: "x", name: "X", type: { kind: "int", bits: 8 } },
+          ],
+        },
+      ],
+    };
+    const n = normalize(pkt);
+    // x lands at absolute offset 32: align measured the 12-bit gap from origin 0,
+    // not from the bounded scope's own start (which was offset 20).
+    expect(n.fields.find((f) => f.id === "x")!.absoluteBitOffset).toBe(32);
   });
 });
 
@@ -463,6 +542,62 @@ describe("normalize — prevIter (§10.4) end-to-end", () => {
   });
 });
 
+// C28/§4/§10.4: prevIter is STICKY across an iteration in which the referenced
+// field was absent (its switch arm was not selected / its optional was not
+// taken). The reference implementation overwrites the prevIter slot only when
+// the field was actually present in the immediately preceding iteration; an
+// absent prior iteration leaves the last present value in place (it does NOT
+// reset to the §10.2 seed / 0). This test pins that behavior.
+describe("normalize — prevIter sticky across an absent iteration (§4/§10.4, C28)", () => {
+  it("keeps the last present value when the prior iteration omitted the field", () => {
+    // element: flag (drives the optional via prevIter(flag)), optional{ val },
+    // pad sized by prevIter(val).
+    //  i0: prevIter(flag) = seed(flag default 1) != 0 -> val#0 present (=7).
+    //  i1: prevIter(flag) = flag#0 = 0           -> optional NOT taken, val absent.
+    //  i2: prevIter(flag) = flag#1 = 1           -> val#2 present.
+    // pad in i2 reads prevIter(val): val#1 is absent, so the slot stays val#0=7
+    // (sticky). A non-sticky impl would reset to the seed (val default 1).
+    const pkt: Packet = {
+      name: "t",
+      body: [
+        {
+          kind: "repeat",
+          id: "r",
+          count: { kind: "lit", value: 3 },
+          element: {
+            id: "el",
+            fields: [
+              { id: "flag", name: "Flag", type: { kind: "int", bits: 8 }, defaultValue: 1 },
+              {
+                kind: "optional",
+                when: { kind: "prevIter", field: "flag" },
+                container: { id: "val", name: "Val", type: { kind: "int", bits: 8 }, defaultValue: 1 },
+              },
+              { id: "pad", name: "Pad", type: { kind: "bytes", n: { kind: "prevIter", field: "val" } } },
+            ],
+          },
+        },
+      ],
+    };
+    const env = new Map<string, number>([
+      ["flag#0", 0], // makes i1's prevIter(flag) == 0 -> val absent in i1
+      ["flag#1", 1], // i2 takes the optional again
+      ["flag#2", 1],
+      ["val#0", 7],
+      ["val#2", 99],
+    ]);
+    const n = normalize(pkt, env);
+    const pads = n.fields.filter((f) => f.id.startsWith("pad#"));
+    // i0: prevIter(val) = seed (val default 1) -> 8 bits.
+    expect(pads[0]!.bits).toBe(1 * 8);
+    // i1: prevIter(val) = val#0 = 7 -> 56 bits.
+    expect(pads[1]!.bits).toBe(7 * 8);
+    // i2: val#1 was absent, so prevIter(val) stays sticky at val#0 = 7, NOT the
+    // seed (1) -> 56 bits. This is the load-bearing assertion for C28.
+    expect(pads[2]!.bits).toBe(7 * 8);
+  });
+});
+
 describe("normalize — prevIter for nested (grouped) element fields (§10.4, fix #3/#7)", () => {
   it("resolves prevIter for a field nested inside a group within the element", () => {
     // element wraps the discriminating field `len` inside a group, plus a
@@ -582,7 +717,7 @@ describe("recordWireSize — sub-byte fields (§4)", () => {
   });
 });
 
-describe("normalize — align top-level cap vs unbounded (§5/§1104, coverage #14)", () => {
+describe("normalize — align top-level cap vs unbounded (§5/§11.2, coverage #14)", () => {
   it("caps padding at the injected total instead of throwing", () => {
     const pkt: Packet = {
       name: "t",
@@ -1062,5 +1197,545 @@ describe("normalize — typeBits edge cases & byteOrder propagation (coverage #1
       body: [{ id: "le", name: "LE", type: { kind: "int", bits: 16 }, byteOrder: "LE" }],
     };
     expect(normalize(pkt).fields[0]!.byteOrder).toBe("LE");
+  });
+});
+
+describe("normalize — value dictionary & provenance propagation (§5.3/§5.4)", () => {
+  it("copies field.values and field.meta verbatim into NormalizedField", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        id: "dscp", name: "DSCP", type: { kind: "int", bits: 6 },
+        meta: { rfc: { defined: 791, updates: [2474, 3168] } },
+        values: [{ value: 46, name: "EF", level: "must", meta: { rfc: 3246 } }],
+      }],
+    };
+    const nf = normalize(pkt).fields[0]!;
+    expect(nf.values).toEqual([{ value: 46, name: "EF", level: "must", meta: { rfc: 3246 } }]);
+    expect(nf.meta).toEqual({ rfc: { defined: 791, updates: [2474, 3168] } });
+  });
+
+  it("omits values/meta when the source field has none", () => {
+    const pkt: Packet = { name: "t", body: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }] };
+    const nf = normalize(pkt).fields[0]!;
+    expect(nf.values).toBeUndefined();
+    expect(nf.meta).toBeUndefined();
+  });
+});
+
+describe("normalize — group RFC provenance propagation (§5.4)", () => {
+  it("copies Group.meta onto each child's groupMeta", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        kind: "group", id: "tos", name: "DiffServ",
+        meta: { rfc: { defined: 791, updates: [2474, 3168] } },
+        children: [
+          { id: "dscp", name: "DSCP", type: { kind: "int", bits: 6 } },
+          { id: "ecn", name: "ECN", type: { kind: "int", bits: 2 } },
+        ],
+      }],
+    };
+    const fs = normalize(pkt).fields;
+    expect(fs.map((f) => f.groupMeta)).toEqual([
+      { rfc: { defined: 791, updates: [2474, 3168] } },
+      { rfc: { defined: 791, updates: [2474, 3168] } },
+    ]);
+  });
+  it("leaves groupMeta undefined when the group has no meta", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        kind: "group", id: "g", name: "G",
+        children: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
+      }],
+    };
+    expect(normalize(pkt).fields[0]!.groupMeta).toBeUndefined();
+  });
+
+  it("falls back to an OUTER group's meta when the inner group has none (§5.4)", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        kind: "group", id: "outer", name: "Outer", meta: { rfc: 791 },
+        children: [{
+          kind: "group", id: "inner", name: "Inner",
+          children: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
+        }],
+      }],
+    };
+    const nf = normalize(pkt).fields[0]!;
+    expect(nf.groupId).toBe("inner");
+    expect(nf.groupMeta).toEqual({ rfc: 791 });
+  });
+
+  it("the innermost group's meta wins over an outer group's meta (§5.4)", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        kind: "group", id: "outer", name: "Outer", meta: { rfc: 791 },
+        children: [{
+          kind: "group", id: "inner", name: "Inner", meta: { rfc: 2474 },
+          children: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
+        }],
+      }],
+    };
+    expect(normalize(pkt).fields[0]!.groupMeta).toEqual({ rfc: 2474 });
+  });
+});
+
+describe("normalize — wire-view encrypted blob attribution (§5/§5.4)", () => {
+  it("carries groupId/groupName/groupMeta like any sibling leaf", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        kind: "group", id: "gMeta", name: "G", meta: { rfc: 50 },
+        children: [
+          {
+            kind: "encrypted", id: "gEnc", wireBits: { kind: "lit", value: 8 },
+            plaintext: { id: "pt", fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] },
+          },
+          { id: "tail", name: "Tail", type: { kind: "int", bits: 8 } },
+        ],
+      }],
+    };
+    const fs = normalize(pkt, new Map(), { viewMode: "wire" }).fields;
+    const enc = fs.find((f) => f.id === "gEnc")!;
+    expect(enc.encrypted).toBe(true);
+    expect(enc.groupId).toBe("gMeta");
+    expect(enc.groupName).toBe("G");
+    expect(enc.groupMeta).toEqual({ rfc: 50 });
+    expect(fs.find((f) => f.id === "tail")!.groupMeta).toEqual({ rfc: 50 });
+  });
+
+  it("carries the switch-arm key (switchCase)", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [
+        { id: "disc", name: "D", type: { kind: "int", bits: 8 }, const: 1 },
+        {
+          kind: "switch", id: "sw", on: { kind: "ref", field: "disc" },
+          cases: {
+            "1": {
+              id: "arm1",
+              fields: [{
+                kind: "encrypted", id: "sEnc", wireBits: { kind: "lit", value: 8 },
+                plaintext: { id: "pt", fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] },
+              }],
+            },
+          },
+        },
+      ],
+    };
+    const enc = normalize(pkt, new Map(), { viewMode: "wire" }).fields.find((f) => f.id === "sEnc")!;
+    expect(enc.switchCase).toBe("1");
+  });
+
+  it("qualifies the blob id per repeat iteration and records repeatIndex", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        kind: "repeat", id: "r", count: { kind: "lit", value: 2 },
+        element: {
+          id: "el",
+          fields: [{
+            kind: "encrypted", id: "rEnc", wireBits: { kind: "lit", value: 8 },
+            plaintext: { id: "pt", fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] },
+          }],
+        },
+      }],
+    };
+    const fs = normalize(pkt, new Map(), { viewMode: "wire" }).fields;
+    expect(fs.map((f) => [f.id, f.repeatIndex])).toEqual([["rEnc#0", 0], ["rEnc#1", 1]]);
+  });
+
+  it("prefixes the blob id inside a ref expansion (RefContainer id rule)", () => {
+    const pkt: Packet = {
+      name: "t",
+      defs: {
+        d: {
+          id: "d",
+          fields: [{
+            kind: "encrypted", id: "dEnc", wireBits: { kind: "lit", value: 8 },
+            plaintext: { id: "pt", fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] },
+          }],
+        },
+      },
+      body: [
+        { kind: "ref", ref: "d", id: "r1" },
+        { kind: "ref", ref: "d", id: "r2" },
+      ],
+    };
+    const fs = normalize(pkt, new Map(), { viewMode: "wire" }).fields;
+    expect(fs.map((f) => f.id)).toEqual(["r1.dEnc", "r2.dEnc"]);
+  });
+});
+
+describe("normalize — virtual name/doc/id (§5)", () => {
+  it("keeps the authored name and doc on the virtual NormalizedField", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [
+        { id: "a", name: "A", type: { kind: "int", bits: 8 } },
+        { kind: "virtual", id: "v", name: "Virtual Name", doc: "virtual doc", expr: { kind: "lit", value: 3 } },
+      ],
+    };
+    const nf = normalize(pkt).fields.find((f) => f.id === "v")!;
+    expect(nf.virtual).toBe(true);
+    expect(nf.name).toBe("Virtual Name");
+    expect(nf.doc).toBe("virtual doc");
+  });
+
+  it("falls back to the id when no name is authored", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{ kind: "virtual", id: "v", expr: { kind: "lit", value: 1 } }],
+    };
+    const nf = normalize(pkt).fields[0]!;
+    expect(nf.name).toBe("v");
+    expect(nf.doc).toBeUndefined();
+  });
+
+  it("records the walk path as originalContainerPath, like every other emitted field", () => {
+    // A virtual inside a group must share its siblings' container path so
+    // (a) an LSP can trace it to the source container, and (b) the layout's
+    // group collapse run is not split by the zero-width entry (§5.4).
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        kind: "group", id: "g2", name: "G2", meta: { rfc: 888 },
+        children: [
+          { id: "ga", name: "GA", type: { kind: "int", bits: 4 } },
+          { kind: "virtual", id: "v1", expr: { kind: "ref", field: "ga" } },
+          { id: "gb", name: "GB", type: { kind: "int", bits: 4 } },
+        ],
+      }],
+    };
+    const fs = normalize(pkt).fields;
+    const ga = fs.find((f) => f.id === "ga")!;
+    const v1 = fs.find((f) => f.id === "v1")!;
+    expect(v1.originalContainerPath).toBe(ga.originalContainerPath);
+    expect(v1.originalContainerPath).toBe("t/g2");
+    expect(v1.groupId).toBe("g2");
+    expect(v1.groupMeta).toEqual({ rfc: 888 });
+  });
+
+  it("qualifies the virtual id inside a repeat (no duplicate bare ids)", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        kind: "repeat", id: "r", count: { kind: "lit", value: 2 },
+        element: {
+          id: "el",
+          fields: [
+            { id: "x", name: "X", type: { kind: "int", bits: 8 } },
+            { kind: "virtual", id: "vv", expr: { kind: "lit", value: 7 } },
+          ],
+        },
+      }],
+    };
+    const fs = normalize(pkt).fields;
+    expect(fs.map((f) => f.id)).toEqual(["x#0", "vv#0", "x#1", "vv#1"]);
+  });
+});
+
+describe("normalize — values/meta propagation through nested paths (§5.3)", () => {
+  it("switch-arm dependent field carries its arm-local values (ICMP two-stage form)", () => {
+    const pkt: Packet = {
+      name: "icmp",
+      body: [
+        { id: "type", name: "Type", type: { kind: "int", bits: 8 }, const: 3 },
+        {
+          kind: "switch", id: "sw", on: { kind: "ref", field: "type" },
+          cases: {
+            "3": {
+              id: "unreach",
+              fields: [{
+                id: "code", name: "Code", type: { kind: "int", bits: 8 },
+                meta: { rfc: 792 },
+                values: [{ value: 3, name: "PortUnreach", label: "Port Unreachable" }],
+              }],
+            },
+          },
+        },
+      ],
+    };
+    const code = normalize(pkt).fields.find((f) => f.id === "code")!;
+    expect(code.switchCase).toBe("3");
+    expect(code.meta).toEqual({ rfc: 792 });
+    expect(resolveValueEntry(code.values, 3)?.name).toBe("PortUnreach");
+  });
+
+  it("ref-expanded fields keep their values and meta under the prefixed id", () => {
+    const pkt: Packet = {
+      name: "t",
+      defs: {
+        d: {
+          id: "d",
+          fields: [{
+            id: "inner", name: "Inner", type: { kind: "int", bits: 8 },
+            meta: { rfc: 111 },
+            values: [{ value: 7, name: "SEVEN" }],
+          }],
+        },
+      },
+      body: [{ kind: "ref", ref: "d", id: "s" }],
+    };
+    const nf = normalize(pkt).fields.find((f) => f.id === "s.inner")!;
+    expect(nf.meta).toEqual({ rfc: 111 });
+    expect(resolveValueEntry(nf.values, 7)?.name).toBe("SEVEN");
+  });
+
+  it("repeat-iteration fields keep values and the enclosing group's meta", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [{
+        kind: "repeat", id: "r", count: { kind: "lit", value: 2 },
+        element: {
+          id: "el",
+          fields: [{
+            kind: "group", id: "g", name: "G", meta: { rfc: 555 },
+            children: [{
+              id: "v", name: "V", type: { kind: "int", bits: 8 },
+              values: [{ value: 1, name: "ONE" }],
+            }],
+          }],
+        },
+      }],
+    };
+    const fs = normalize(pkt).fields;
+    expect(fs.map((f) => f.id)).toEqual(["v#0", "v#1"]);
+    for (const nf of fs) {
+      expect(nf.groupMeta).toEqual({ rfc: 555 });
+      expect(resolveValueEntry(nf.values, 1)?.name).toBe("ONE");
+    }
+  });
+});
+
+describe("normalize — region meta is source-AST only (§5.4 carve-out)", () => {
+  it("switch-arm / repeat-element / optional / defs meta does not propagate to normalized fields", () => {
+    // §5.4: these containers are transparent in the flat normalized model, so
+    // their region meta stays documentation-grade provenance in the source
+    // AST. Fields inside them remain attributable via switchCase /
+    // repeatIndex / originalContainerPath instead.
+    const pkt: Packet = {
+      name: "t",
+      defs: {
+        d: {
+          id: "d",
+          meta: { rfc: 333 },
+          fields: [{ id: "df", name: "DF", type: { kind: "int", bits: 8 } }],
+        },
+      },
+      body: [
+        { id: "disc", name: "Disc", type: { kind: "int", bits: 8 }, const: 1 },
+        {
+          kind: "switch", id: "sw", on: { kind: "ref", field: "disc" },
+          cases: {
+            "1": {
+              id: "arm1", meta: { rfc: 792 },
+              fields: [{ id: "swf", name: "SWF", type: { kind: "int", bits: 8 } }],
+            },
+          },
+        },
+        {
+          kind: "repeat", id: "r", count: { kind: "lit", value: 1 },
+          element: {
+            id: "el", meta: { rfc: 555 },
+            fields: [{ id: "rf", name: "RF", type: { kind: "int", bits: 8 } }],
+          },
+        },
+        {
+          kind: "optional", when: { kind: "lit", value: 1 }, meta: { rfc: 444 },
+          container: { id: "of", name: "OF", type: { kind: "int", bits: 8 } },
+        },
+        { kind: "ref", ref: "d", id: "x" },
+      ],
+    };
+    const fs = normalize(pkt).fields;
+    // No emitted field carries any of the region metas…
+    const rfcs = fs.flatMap((f) => [f.meta, f.groupMeta]).filter((m) => m !== undefined);
+    expect(rfcs).toEqual([]);
+    // …but every region's fields stay attributable to their source region.
+    expect(fs.find((f) => f.id === "swf")!.switchCase).toBe("1");
+    expect(fs.find((f) => f.id === "rf#0")!.repeatIndex).toBe(0);
+    expect(fs.find((f) => f.id === "x.df")).toBeDefined();
+    expect(fs.find((f) => f.id === "of")).toBeDefined();
+  });
+});
+
+// D7: a single-field shared value-dictionary def, reused via two `ref`s. The
+// expanded leaf carries the source field's values/meta unchanged (the new §5.3
+// propagation MUST), while the def's own NamedStruct.meta does NOT appear.
+describe("normalize — shared value-dictionary def propagation (§5.3, D7)", () => {
+  const pkt: Packet = {
+    name: "ethertype-share",
+    body: [
+      { kind: "ref", ref: "etherType", id: "ethType", name: "EtherType" },
+      { kind: "ref", ref: "etherType", id: "innerType", name: "Inner EtherType" },
+    ],
+    defs: {
+      etherType: {
+        id: "etherType",
+        doc: "IANA EtherType registry (single field, shared)",
+        // def-level meta is source-AST-only and must NOT reach NormalizedField.
+        meta: { rfc: 9999, section: "def-only" },
+        fields: [{
+          id: "value", name: "EtherType", type: { kind: "int", bits: 16 },
+          category: "type", display: "hex",
+          meta: { rfc: 7042, section: "2.3.1" },
+          values: [
+            { value: 0x0800, name: "IPv4", label: "Internet Protocol v4", meta: { rfc: 894 } },
+            { value: 0x0806, name: "ARP", label: "Address Resolution Protocol", meta: { rfc: 826 } },
+            { value: 0x86dd, name: "IPv6", label: "Internet Protocol v6", meta: { rfc: 8200 } },
+            { range: [0x0000, 0x05dc], name: "LEN", label: "IEEE 802.3 length (<=1500)" },
+            { pattern: "1111111111111111", name: "RESERVED", label: "Reserved" },
+          ],
+        }],
+      },
+    },
+  };
+
+  it("carries values+meta through both ref expansions at the expanded leaf id (a)", () => {
+    const fs = normalize(pkt).fields;
+    const a = fs.find((f) => f.id === "ethType.value")!;
+    const b = fs.find((f) => f.id === "innerType.value")!;
+    expect(a.values?.length).toBe(5);
+    expect(b.values?.length).toBe(5);
+    expect(a.meta).toEqual({ rfc: 7042, section: "2.3.1" });
+    expect(b.meta).toEqual({ rfc: 7042, section: "2.3.1" });
+  });
+
+  it("resolves value/range/pattern entries correctly via resolveValueEntry (b)", () => {
+    const a = normalize(pkt).fields.find((f) => f.id === "ethType.value")!;
+    const v = a.values!;
+    expect(resolveValueEntry(v, 0x0800)?.name).toBe("IPv4");   // exact
+    expect(resolveValueEntry(v, 0x0100)?.name).toBe("LEN");    // range
+    expect(resolveValueEntry(v, 0xffff)?.name).toBe("RESERVED"); // pattern
+  });
+
+  it("does NOT surface the def's own NamedStruct.meta on any NormalizedField (c, MUST boundary)", () => {
+    const fs = normalize(pkt).fields;
+    // The only meta present is the field-declared one; the def's { section: "def-only" } never appears.
+    for (const f of fs) {
+      expect(f.meta?.section).not.toBe("def-only");
+      expect(f.meta?.rfc).not.toBe(9999);
+    }
+  });
+});
+
+// D9: checksum binding (algorithm, covers, pseudoHeader, params incl. width)
+// rides through to the NormalizedField for codegen/LSP.
+describe("normalize — checksum binding propagation (§8, D9)", () => {
+  it("carries checksumAlgorithm/checksumCovers/checksumParams onto the NormalizedField", () => {
+    const pkt: Packet = {
+      name: "t",
+      body: [
+        {
+          id: "crc", name: "CRC-64", type: { kind: "int", bits: 64 }, category: "checksum",
+          checksumAlgorithm: "crc64-ecma182", checksumCovers: ["data"],
+          checksumParams: { polynomial: "0xAD93D23594C935A9", width: 64 },
+        },
+        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "lit", value: 8 } } },
+      ],
+    };
+    const crc = normalize(pkt).fields.find((f) => f.id === "crc")!;
+    expect(crc.checksumAlgorithm).toBe("crc64-ecma182");
+    expect(crc.checksumCovers).toEqual(["data"]);
+    expect(crc.checksumParams).toEqual({ polynomial: "0xAD93D23594C935A9", width: 64 });
+  });
+});
+
+// D6: headerProtected may name a plaintext-external field declared earlier in
+// the same body (QUIC long-header: firstByte and packetNumber). The tag rides
+// on the already-emitted top-level field in both views.
+describe("normalize — plaintext-external headerProtected (§5, D6)", () => {
+  const quic: Packet = {
+    name: "quic",
+    body: [
+      { id: "firstByte", name: "First Byte", type: { kind: "int", bits: 8 } },
+      { id: "version", name: "Version", type: { kind: "int", bits: 32 } },
+      { id: "packetNumber", name: "Packet Number", type: { kind: "bytes", n: { kind: "lit", value: 4 } } },
+      {
+        kind: "encrypted", id: "payload", contextNote: "AEAD-protected payload",
+        wireBits: { kind: "lit", value: 800 },
+        plaintext: { id: "frames", fields: [{ id: "data", name: "Frame Data", type: { kind: "bytes", n: { kind: "remaining" } } }] },
+        headerProtected: ["firstByte", "packetNumber"],
+      },
+    ],
+  };
+  it("tags the plaintext-external header fields in wire view", () => {
+    const fs = normalize(quic, new Map(), { viewMode: "wire" }).fields;
+    expect(fs.find((f) => f.id === "firstByte")!.headerProtected).toBe(true);
+    expect(fs.find((f) => f.id === "packetNumber")!.headerProtected).toBe(true);
+    expect(fs.find((f) => f.id === "version")!.headerProtected).toBeUndefined();
+  });
+  it("tags the same fields in semantic view", () => {
+    const fs = normalize(quic, new Map(), { viewMode: "semantic" }).fields;
+    expect(fs.find((f) => f.id === "firstByte")!.headerProtected).toBe(true);
+    expect(fs.find((f) => f.id === "packetNumber")!.headerProtected).toBe(true);
+  });
+});
+
+// D3: a delimiter-terminated bytes field resolves its length from a qualified
+// seed-injection key (§3/§10.7); with no injection it lays out as 0 bytes.
+describe("normalize — bytes delimiter length (§3/§10.7, D3)", () => {
+  const pkt: Packet = {
+    name: "http",
+    body: [
+      { id: "requestLine", name: "Request line", display: "ascii", type: { kind: "bytes", n: { delimiter: [13, 10] } } },
+      { id: "rest", name: "Rest", type: { kind: "bytes", n: { kind: "remaining" } } },
+    ],
+  };
+  it("uses the injected qualified length and keeps it distinct from the value slot", () => {
+    // "GET /\r\n" = 7 bytes including CRLF.
+    const env = new Map<string, number>([
+      ["__bytesDelimLen__requestLine", 7],
+      // env[id] is the field value slot; it must NOT be confused with the length.
+      ["requestLine", 999],
+    ]);
+    const fs = normalize(pkt, env, { viewMode: "wire", totalBits: 100 * 8 }).fields;
+    const rl = fs.find((f) => f.id === "requestLine")!;
+    expect(rl.bits).toBe(7 * 8);
+  });
+  it("lays out as 0 bytes (unknown) with no injection (static preview)", () => {
+    const fs = normalize(pkt, new Map(), { viewMode: "wire", totalBits: 100 * 8 }).fields;
+    expect(fs.find((f) => f.id === "requestLine")!.bits).toBe(0);
+  });
+});
+
+// D4: subfields ride through to the NormalizedField for LSP/codegen value
+// decode. Render sub-cell positioning is deferred (not guaranteed in 0.5).
+describe("normalize — subfields propagation (§12, D4)", () => {
+  it("copies subfields verbatim onto the NormalizedField", () => {
+    const pkt: Packet = {
+      name: "ieee802154", byteOrder: "LE",
+      body: [{
+        id: "fcf", name: "Frame Control", type: { kind: "int", bits: 16 }, display: "hex",
+        subfields: [
+          { id: "frameType", name: "Frame Type", mask: 0x0007, category: "type" },
+          { id: "srcAddrMode", name: "Src Addr Mode", mask: 0xc000, category: "type" },
+        ],
+      }],
+    };
+    const fcf = normalize(pkt).fields.find((f) => f.id === "fcf")!;
+    expect(fcf.subfields?.length).toBe(2);
+    expect(fcf.subfields?.[0]).toEqual({ id: "frameType", name: "Frame Type", mask: 0x0007, category: "type" });
+  });
+
+  it("exposes mask subfields via NormalizedField.subfields but NOT via ResolvedLayout (§12 boundary)", () => {
+    const pkt: Packet = {
+      name: "ieee802154", byteOrder: "LE", rowBits: 16,
+      body: [{
+        id: "fcf", name: "Frame Control", type: { kind: "int", bits: 16 },
+        subfields: [{ id: "frameType", name: "Frame Type", mask: 0x0007 }],
+      }],
+    };
+    // Present on the normalized field…
+    expect(normalize(pkt).fields.find((f) => f.id === "fcf")!.subfields?.length).toBe(1);
+    // …and intentionally absent from the layout (wire-render position not guaranteed in 0.5).
+    const cell = resolveLayout(pkt).cells.find((c) => c.field.id === "fcf")!;
+    expect(cell.field.subfields).toBeUndefined();
+    expect(cell.subCells).toBeUndefined();
   });
 });

@@ -31,11 +31,52 @@ export const CATEGORY_TOKENS: readonly CategoryToken[] = [
 
 export type TypeInt = { kind: "int"; bits: number; signed?: boolean };
 export type TypeBits = { kind: "bits"; n: number };
+/**
+ * Delimiter-terminated byte length (§3, D3). The field spans from the current
+ * parse position up to and including the first complete occurrence of the
+ * delimiter byte sequence; the delimiter is always consumed and is part of the
+ * field's wire footprint (and of any `display` rendering). `delimiter` is a
+ * non-empty list of byte integers (each 0–255). Length is decoder-determined
+ * and supplied by seed injection under a dedicated key (§10.7), forward-only and
+ * relative. This `delimiter` form is unrelated to the `repeat.count.until`
+ * after-iteration predicate (§5); they share no keyword.
+ */
+export type BytesDelimited = { delimiter: number[] };
 /** Variable-length byte array; use `n: { kind: remaining }` for "all remaining" (§3). */
-export type TypeBytes = { kind: "bytes"; n: Expr };
+export type TypeBytes = { kind: "bytes"; n: Expr | BytesDelimited };
 
-export type EnumVariantObj = { label: string; doc?: string };
+export type EnumVariantObj = { label: string; doc?: string; level?: NormativeLevel; meta?: FieldMeta };
 export type EnumVariant = string | EnumVariantObj;
+
+/**
+ * Open value-dictionary entry (§5.3). Annotates a single discrete value or an
+ * inclusive range with meaning, normative strength, and provenance.
+ * Purely annotational: it does NOT close the value space (out-of-list values
+ * remain valid) and carries no wire semantics.
+ */
+export type ValueEntry = {
+  /** Single value. Mutually exclusive with `range` and `pattern`. */
+  value?: number;
+  /** Inclusive [min, max] range. Mutually exclusive with `value` and `pattern`. */
+  range?: [number, number];
+  /**
+   * Ternary bit-pattern predicate (§5.3): a string of `0`, `1`, and `x`
+   * (don't-care), read like a binary literal — the rightmost character is bit 0
+   * (LSB). Matches when every non-`x` bit equals the observed bit. Expresses
+   * non-contiguous pools a `range` cannot, e.g. the DSCP experimental pool
+   * `"xxxx11"`. Mutually exclusive with `value`/`range`. Contradictions are
+   * unrepresentable by construction (every character is 0, 1, or x).
+   */
+  pattern?: string;
+  /** Short machine-style symbol, e.g. "EF", "Not-ECT". */
+  name?: string;
+  /** Human-readable label, e.g. "Expedited Forwarding". */
+  label?: string;
+  doc?: string;
+  /** Normative strength of this value (RFC 2119). Absent ≡ "may". */
+  level?: NormativeLevel;
+  meta?: FieldMeta;
+};
 
 export type TypeEnum = {
   kind: "enum";
@@ -130,12 +171,29 @@ export const CHECKSUM_ALGORITHMS = [
 ] as const;
 export type ChecksumAlgorithm = string;
 
+/**
+ * CRC parameter overrides (§8). Only valid alongside a `checksumAlgorithm` that
+ * uses the CRC parameter model; pairing it with a named non-CRC algorithm
+ * (`internet`, `adler32`) is a validation error (§11.1).
+ */
 export type ChecksumParams = {
-  polynomial?: number;
-  initValue?: number;
-  finalXOR?: number;
+  /**
+   * Generator polynomial. A bare integer for values ≤ 2^53−1; values that need
+   * more than 53 bits MUST be written as a `^0x[0-9A-Fa-f]+$` hex string so the
+   * full 64-bit precision survives (a bare integer would lose precision, §8).
+   */
+  polynomial?: number | string;
+  initValue?: number | string;
+  finalXOR?: number | string;
   inputReflect?: boolean;
   outputReflect?: boolean;
+  /**
+   * CRC width in bits (1–64). Optional; when absent the CRC width equals the
+   * checksum value field's declared bit width (int.bits / bits.n). Required when
+   * the checksum field's type does not have a single declared bit width (e.g. a
+   * `bytes` field), §8.
+   */
+  width?: number;
 };
 
 export type PseudoHeader = "ipv4" | "ipv6";
@@ -146,12 +204,67 @@ export type PseudoHeader = "ipv4" | "ipv6";
 
 export type DisplayHint = "dec" | "hex" | "oct" | "bin" | "ascii" | "utf8" | "addr";
 
-/** Per-field / per-region RFC annotation (§5). */
-export type FieldMeta = { rfc?: number; section?: string };
+/**
+ * RFC 2119 normative strength. The default when absent is context-dependent:
+ * "must" on a Constraint (legacy fixed behaviour, §9.1), but "may" on a value
+ * dictionary entry / enum variant (§5.3) since those are annotations, not rules.
+ */
+export type NormativeLevel = "must" | "should" | "may";
+
+/**
+ * A single updating-RFC reference (§5.4). Either a bare RFC number (≡ `{ rfc: N }`
+ * with no section) or an object carrying the updating RFC number plus the section
+ * of THAT updating RFC. The defining RFC's own section is carried separately by
+ * the sibling `meta.section`.
+ */
+export type UpdateRef = number | { rfc: number; section?: string };
+
+/**
+ * Multi-layer RFC provenance (§5.4). Either a bare RFC number (legacy 0.5 form)
+ * or an object recording the defining RFC plus the chain of RFCs that updated
+ * the field's layout or semantics. LSP renders "defined by N, updated by …".
+ * Each `updates` entry may be a bare number or `{ rfc, section? }`.
+ */
+export type RfcRef = number | { defined: number; updates?: UpdateRef[] };
+
+/** Per-field / per-region RFC annotation (§5.4). */
+export type FieldMeta = { rfc?: RfcRef; section?: string };
 
 /* ------------------------------------------------------------------ *
  * Containers
  * ------------------------------------------------------------------ */
+
+/**
+ * Author-facing bit-field annotation over a parent `int`/byte-aligned-`bits`
+ * field (§12, D4). A subfield decodes a slice of the parent's BYTE-ORDER-RESOLVED
+ * integer value: its value is `(fieldValue & mask) >> lowestSetBit(mask)`, with
+ * bit 0 = the least-significant bit (identical to ValueEntry.pattern's bit-0=LSB
+ * convention, §5.3). Because the convention is defined over the *decoded value*,
+ * it is byte-order-independent and works identically for LE and BE words — which
+ * is precisely why it succeeds where a naive MSB-first bits-group fails for
+ * little-endian words (802.15.4 / 802.11 / CAN). Subfields are display/annotation
+ * only: they consume no wire bits, add no parse semantics, do not appear in
+ * `env`, and do not affect `checksumCovers`, expressions, or scoping.
+ *
+ * RENDER POSITION (this version): subfields carry value-decode semantics for
+ * LSP/codegen. A renderer MAY derive sub-cell wire positions from the masks, but
+ * exact wire-render placement (especially the non-contiguous LE case) is **not
+ * guaranteed by 0.5** and is a candidate for a follow-up revision (§12).
+ *
+ * `mask` is a non-negative integer; a hex string is permitted for masks needing
+ * more than 53 bits (the D9 precedent), and tools MUST decode such masks at full
+ * 64-bit precision.
+ */
+export type Subfield = {
+  id: string;
+  name: string;
+  mask: number | string;
+  doc?: string;
+  values?: readonly ValueEntry[];
+  level?: NormativeLevel;
+  category?: CategoryToken;
+  meta?: FieldMeta;
+};
 
 export type Field = {
   kind?: "field";
@@ -170,8 +283,15 @@ export type Field = {
   checksumParams?: ChecksumParams;
   const?: number;
   display?: DisplayHint;
+  /** Open value dictionary for discrete values of this field (§5.3). */
+  values?: readonly ValueEntry[];
   /** Serializer hint; must be a wireSize expression (§4, §6). */
   computedFrom?: ExprWireSize;
+  /**
+   * Mask-addressed bit subfields over this `int` / byte-aligned `bits` field
+   * (§12, D4). Display/annotation only; value bit 0 = LSB of the decoded value.
+   */
+  subfields?: readonly Subfield[];
 };
 
 /** Computed auxiliary field; consumes zero wire bytes (§5). */
@@ -205,6 +325,13 @@ export type Struct = {
 export type NamedStruct = {
   id: string;
   doc?: string;
+  /**
+   * RFC provenance for the def as a whole (§5.4, §6). Documentation-grade:
+   * available through the source AST only — a `ref` expansion is transparent
+   * and emits no container field, so this meta does not appear in the
+   * normalized/layout output.
+   */
+  meta?: FieldMeta;
   recursive?: boolean;
   fields: Container[];
 };
@@ -250,6 +377,8 @@ export type Encrypted = {
   headerProtected?: string[];
   category?: CategoryToken;
   doc?: string;
+  /** RFC provenance for the encrypted region (§5.4). */
+  meta?: FieldMeta;
 };
 
 export type RefContainer = {
@@ -278,6 +407,8 @@ export type Bounded = {
   fields: Container[];
   name?: string;
   doc?: string;
+  /** RFC provenance for the bounded region (§5.4). */
+  meta?: FieldMeta;
 };
 
 export type Container =
@@ -300,6 +431,12 @@ export type Constraint = {
   lhs: Expr;
   rhs: Expr;
   doc?: string;
+  /**
+   * Normative strength (§9). Absent ≡ "must". Only `must` constraints (and
+   * those with no level) participate in solver back-propagation; `should`/`may`
+   * are diagnostic-only (§9.1).
+   */
+  level?: NormativeLevel;
 };
 
 /* ------------------------------------------------------------------ *
@@ -307,7 +444,7 @@ export type Constraint = {
  * ------------------------------------------------------------------ */
 
 export type PacketMeta = {
-  rfc?: number;
+  rfc?: RfcRef;
   section?: string;
   aliases?: string[];
 };
@@ -374,8 +511,24 @@ export type NormalizedField = {
   byteOrder?: "BE" | "LE";
   groupId?: string;
   groupName?: string;
+  /** RFC provenance of the enclosing group, for per-group LSP deep-linking (§5.4). */
+  groupMeta?: FieldMeta;
   /** Virtual (zero-width computed) field marker. */
   virtual?: boolean;
+  /** Value dictionary copied verbatim from the source Field (§5.3). */
+  values?: readonly ValueEntry[];
+  /** RFC provenance copied verbatim from the source Field (§5.4). */
+  meta?: FieldMeta;
+  /** Mask-addressed bit subfields copied verbatim from the source Field (§12, D4). */
+  subfields?: readonly Subfield[];
+  /** Checksum algorithm copied verbatim from the source Field, for codegen (§8). */
+  checksumAlgorithm?: ChecksumAlgorithm;
+  /** Covered field ids copied verbatim from the source Field (§8). */
+  checksumCovers?: string[];
+  /** Pseudo-header copied verbatim from the source Field (§8). */
+  checksumPseudoHeader?: PseudoHeader;
+  /** CRC parameter overrides copied verbatim from the source Field (§8). */
+  checksumParams?: ChecksumParams;
 };
 
 export type Normalized = {
@@ -396,6 +549,8 @@ export type LayoutSubField = {
   name: string;
   bits: number;
   description?: string;
+  values?: readonly ValueEntry[];
+  meta?: FieldMeta;
 };
 
 export type LayoutField = {
@@ -404,6 +559,8 @@ export type LayoutField = {
   bits: number;
   category?: CategoryToken;
   description?: string;
+  values?: readonly ValueEntry[];
+  meta?: FieldMeta;
   subfields?: LayoutSubField[];
 };
 

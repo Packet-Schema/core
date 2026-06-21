@@ -48,6 +48,11 @@ export function resolveLayout(
         bits: nf.bits,
         ...(nf.category ? { category: nf.category } : {}),
         ...(nf.doc ? { description: nf.doc } : {}),
+        ...(nf.values ? { values: nf.values } : {}),
+        // Field meta wins; fall back to the enclosing group's meta so a
+        // single-child group (not collapsed into a parent) still surfaces its
+        // RFC provenance for per-group deep-linking (§5.4).
+        ...(nf.meta ? { meta: nf.meta } : nf.groupMeta ? { meta: nf.groupMeta } : {}),
       };
       bitPos = emitField(field, nf, bitPos, rowBits, cells);
       continue;
@@ -55,10 +60,15 @@ export function resolveLayout(
     const totalBits = g.children.reduce((a, f) => a + f.bits, 0);
     if (totalBits === 0) continue;
     const subfields: LayoutSubField[] = g.children.map((c) => ({
-      id: c.id.replace(/#\d+$/, ""),
+      // Strip the repeat suffix back to the source field id. Nested repeats
+      // join their index stack with "_" (normalize.ts repeatSuffix), so the
+      // suffix shape is "#0", "#0_1", "#0_1_2", …
+      id: c.id.replace(/#\d+(?:_\d+)*$/, ""),
       name: c.name,
       bits: c.bits,
       ...(c.doc ? { description: c.doc } : {}),
+      ...(c.values ? { values: c.values } : {}),
+      ...(c.meta ? { meta: c.meta } : {}),
     }));
     const field: LayoutField = {
       id: g.parentId,
@@ -68,6 +78,8 @@ export function resolveLayout(
       ...(g.children.find((c) => c.category)?.category
         ? { category: g.children.find((c) => c.category)!.category! }
         : {}),
+      // §5.4: surface the enclosing group's RFC provenance for per-group LSP deep-linking.
+      ...(g.children[0]?.groupMeta ? { meta: g.children[0].groupMeta } : {}),
     };
     const allEncrypted = g.children.every((c) => c.encrypted);
     const sharedParentId =
@@ -120,8 +132,17 @@ function groupConsecutiveByContainer(fields: NormalizedField[]): GroupedRun[] {
       run.push(fields[j]!);
       j++;
     }
-    if (run.length === 1) { out.push({ kind: "flat", field: f }); i = j; continue; }
-    out.push({ kind: "collapsed", parentId: groupId, parentName: f.groupName ?? groupId, children: run });
+    // Virtual fields are zero-width tooling entries (§5): they participate in
+    // the run (so a virtual between two group fields does not split the
+    // group's collapse) but are not rendered, so they neither count toward
+    // the flat/collapsed decision nor appear as subfields.
+    const real = run.filter((c) => !c.virtual);
+    if (real.length <= 1) {
+      for (const c of run) out.push({ kind: "flat", field: c });
+      i = j;
+      continue;
+    }
+    out.push({ kind: "collapsed", parentId: groupId, parentName: f.groupName ?? groupId, children: real });
     i = j;
   }
   return out;

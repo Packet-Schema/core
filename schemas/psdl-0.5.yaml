@@ -113,8 +113,8 @@ $defs:
     description: RFC and alias metadata for tooling (codegen, Chrome extension, LSP).
     properties:
       rfc:
-        type: integer
-        description: RFC number.
+        $ref: '#/$defs/RfcRef'
+        description: RFC provenance (bare number, or {defined, updates}).
       section:
         type: string
         description: RFC section reference (e.g. "3.1").
@@ -122,6 +122,45 @@ $defs:
         type: array
         items: { type: string }
         description: Alternative names for this packet type.
+
+  # ────────────────────────────────────────────────────────────────────
+  # Normative levels and RFC provenance
+  # ────────────────────────────────────────────────────────────────────
+  NormativeLevel:
+    type: string
+    enum: [must, should, may]
+    description: |-
+      RFC 2119 normative strength. Absent is treated as "must" for constraints
+      and as "may" for value-dictionary and enum-variant entries (§9.1, §5.3).
+
+  RfcRef:
+    description: |-
+      RFC provenance. Either a bare RFC number (legacy 0.5 form) or an object
+      recording the defining RFC plus the chain of updating RFCs (§5.4).
+    oneOf:
+      - type: integer
+      - type: object
+        required: [defined]
+        additionalProperties: false
+        properties:
+          defined: { type: integer, description: RFC that originally defined this field. }
+          updates:
+            type: array
+            description: |-
+              RFCs that later updated this field's layout or semantics. Each
+              entry is either a bare RFC number (no section) or an object
+              { rfc (required), section? } naming the section of that updating
+              RFC (§5.4). The defining RFC's own section is carried by the
+              sibling meta.section.
+            items:
+              oneOf:
+                - type: integer
+                - type: object
+                  required: [rfc]
+                  additionalProperties: false
+                  properties:
+                    rfc:     { type: integer, description: An updating RFC number. }
+                    section: { type: string, description: 'Section of that updating RFC (e.g. "3").' }
 
   # ────────────────────────────────────────────────────────────────────
   # Per-field / per-group RFC metadata
@@ -132,8 +171,8 @@ $defs:
     description: Per-field or per-group RFC annotation used by Chrome extension and LSP.
     properties:
       rfc:
-        type: integer
-        description: RFC number this field is defined in.
+        $ref: '#/$defs/RfcRef'
+        description: RFC provenance (bare number, or {defined, updates}).
       section:
         type: string
         description: RFC section reference for this specific field.
@@ -189,32 +228,50 @@ $defs:
     description: |-
       CRC algorithm parameters for codegen. Allows full specification of
       arbitrary CRC variants without a custom algorithm name string.
+      Only valid on a field whose checksumAlgorithm uses the CRC parameter
+      model; pairing it with a named non-CRC algorithm (internet, adler32)
+      is a validation error (§8, §11.1).
     properties:
       polynomial:
-        type: integer
-        minimum: 0
+        oneOf:
+          - { type: integer, minimum: 0 }
+          - { type: string, pattern: '^0x[0-9A-Fa-f]+$' }
         description: |-
-          Generator polynomial (normal / non-reflected form). No upper bound
-          is imposed to allow CRC-64 variants (e.g. NVMe CRC-64/ECMA-182,
-          polynomial 0xAD93D23594C935A9).
+          Generator polynomial (normal / non-reflected form). A bare integer is
+          accepted for values ≤ 2^53−1; values needing more than 53 bits (e.g.
+          NVMe CRC-64/ECMA-182 polynomial 0xAD93D23594C935A9) MUST be written as
+          a 0x hex string so the full 64-bit precision survives. Note: the
+          schema accepts any non-negative integer, but the validator rejects a
+          bare integer above 2^53−1 (write it as a hex string instead) — schema
+          acceptance is not validity here (§8 Integer precision, §11.1).
       initValue:
-        type: integer
-        minimum: 0
+        oneOf:
+          - { type: integer, minimum: 0 }
+          - { type: string, pattern: '^0x[0-9A-Fa-f]+$' }
         description: |-
-          Initial CRC register value. No upper bound is imposed to allow
-          CRC-64 variants.
+          Initial CRC register value. Same precision rule as polynomial: use a
+          0x hex string for values above 2^53−1.
       finalXOR:
-        type: integer
-        minimum: 0
+        oneOf:
+          - { type: integer, minimum: 0 }
+          - { type: string, pattern: '^0x[0-9A-Fa-f]+$' }
         description: |-
-          Value XORed with the final CRC result. No upper bound is imposed
-          to allow CRC-64 variants.
+          Value XORed with the final CRC result. Same precision rule as
+          polynomial: use a 0x hex string for values above 2^53−1.
       inputReflect:
         type: boolean
         description: Reflect each input byte before processing.
       outputReflect:
         type: boolean
         description: Reflect the final CRC before applying finalXOR.
+      width:
+        type: integer
+        minimum: 1
+        maximum: 64
+        description: |-
+          CRC width in bits (1–64). Optional; when absent the width equals the
+          checksum value field's declared bit width. Required when the field's
+          type has no single declared bit width (e.g. bytes), §8.
 
   # ────────────────────────────────────────────────────────────────────
   # Expressions
@@ -314,6 +371,7 @@ $defs:
         type: integer
         minimum: 1
         maximum: 64
+        description: 'Number of bits to read ahead; an integer in 1–64 (§4, §11.1).'
       offset: { $ref: '#/$defs/Expr' }
 
   ExprLookup:
@@ -474,19 +532,105 @@ $defs:
     required: [kind, n]
     additionalProperties: false
     description: |-
-      Variable-length byte array; length given by expression (in bytes).
-      To consume all remaining bytes of the enclosing scope-providing
-      container use n: { kind: remaining } (§4). For end-anchored fields, size
-      this field n: remaining - <constByteCount> and place the fixed-width end
-      fields after it (§5).
+      Variable-length byte array; length given by an expression (in bytes) or by
+      a `delimiter` form (§3). To consume all remaining bytes of the
+      enclosing scope-providing container use n: { kind: remaining } (§4). For
+      end-anchored fields, size this field n: remaining - <constByteCount> and
+      place the fixed-width end fields after it (§5).
     properties:
       kind: { const: bytes }
       n:
-        $ref: '#/$defs/Expr'
+        oneOf:
+          - $ref: '#/$defs/Expr'
+          - $ref: '#/$defs/BytesDelimited'
+
+  BytesDelimited:
+    type: object
+    required: [delimiter]
+    additionalProperties: false
+    description: |-
+      Delimiter-terminated byte length (§3). The field spans from the current
+      parse position up to and including the first complete occurrence of the
+      delimiter byte sequence; the delimiter is always consumed and is part of
+      the field's wire footprint. Length is decoder-determined and forward-only.
+      Unrelated to the repeat.count.until after-iteration predicate (§5).
+    properties:
+      delimiter:
+        type: array
+        minItems: 1
+        items: { type: integer, minimum: 0, maximum: 255 }
+        description: Non-empty list of delimiter byte values (each 0–255), e.g. [13, 10] for CRLF or [0] for NUL.
+
+  ValueEntry:
+    type: object
+    additionalProperties: false
+    description: |-
+      Open value-dictionary entry (§5.3). Annotates one discrete value or an
+      inclusive range with meaning, normative strength, and provenance. Purely
+      annotational: does not close the value space and carries no wire semantics.
+    properties:
+      value:
+        type: integer
+        description: Single value. Mutually exclusive with `range`/`pattern`.
+      range:
+        type: array
+        minItems: 2
+        maxItems: 2
+        items: { type: integer }
+        description: Inclusive [min, max] (min ≤ max enforced by the validator). Mutually exclusive with `value`/`pattern`.
+      pattern:
+        type: string
+        pattern: '^[01xX]+$'
+        description: >-
+          Ternary bit-pattern predicate (0/1/x; uppercase X is accepted as a
+          synonym for x), read like a binary literal (rightmost char = bit 0).
+          Matches when every non-x bit equals the observed bit, e.g. "xxxx11"
+          for the DSCP experimental pool. Mutually exclusive with
+          `value`/`range`.
+      name:   { type: string, description: Short machine-style symbol (e.g. "EF"). }
+      label:  { type: string, description: Human-readable label. }
+      doc:    { type: string }
+      level:  { $ref: '#/$defs/NormativeLevel' }
+      meta:   { $ref: '#/$defs/FieldMeta' }
+    oneOf:
+      - required: [value]
+      - required: [range]
+      - required: [pattern]
+
+  Subfield:
+    type: object
+    required: [id, name, mask]
+    additionalProperties: false
+    description: |-
+      Mask-addressed bit subfield over a parent int / byte-aligned bits field
+      (§12). The subfield decodes a slice of the parent's byte-order-resolved
+      integer value (value bit 0 = LSB). Display/annotation only — no wire bits,
+      no parse semantics. The mask must fit the parent's declared width (a
+      validator-layer check). Render-position placement is not guaranteed by 0.5.
+    properties:
+      id:
+        type: string
+        pattern: '^[a-zA-Z][a-zA-Z0-9_-]*$'
+      name:
+        type: string
+      mask:
+        oneOf:
+          - { type: integer, minimum: 0 }
+          - { type: string, pattern: '^0x[0-9A-Fa-f]+$' }
+        description: |-
+          Bit mask over the parent's decoded value (bit 0 = LSB). A bare integer
+          for ≤ 2^53−1; a 0x hex string for wider masks (D9 precedent), decoded
+          at full 64-bit precision.
+      doc:      { type: string }
+      values:   { type: array, items: { $ref: '#/$defs/ValueEntry' } }
+      level:    { $ref: '#/$defs/NormativeLevel' }
+      category: { $ref: '#/$defs/CategoryToken' }
+      meta:     { $ref: '#/$defs/FieldMeta' }
 
   EnumVariant:
     description: |-
-      Enum variant label. Either a plain string or an object with doc.
+      Enum variant label. Either a plain string or an object with label, doc,
+      level (absent ≡ may, §9.1), and meta (§5.4).
     oneOf:
       - type: string
       - type: object
@@ -495,6 +639,8 @@ $defs:
         properties:
           label: { type: string }
           doc:   { type: string }
+          level: { $ref: '#/$defs/NormativeLevel' }
+          meta:  { $ref: '#/$defs/FieldMeta' }
 
   TypeEnum:
     type: object
@@ -506,6 +652,7 @@ $defs:
       bits:     { type: integer, minimum: 1 }
       variants:
         type: object
+        propertyNames: { pattern: '^(0|[1-9][0-9]*)$' }
         additionalProperties:
           $ref: '#/$defs/EnumVariant'
 
@@ -678,6 +825,20 @@ $defs:
           Display hint for renderers and Wireshark codegen. For numeric fields
           a base (dec/hex/oct/bin, default dec); for bytes fields a rendering
           (ascii/utf8/addr, default hex). No effect on wire encoding (§14).
+      values:
+        type: array
+        items: { $ref: '#/$defs/ValueEntry' }
+        description: |-
+          Open value dictionary for this field's discrete values (§5.3).
+          Annotational only; does not close the value space.
+      subfields:
+        type: array
+        items: { $ref: '#/$defs/Subfield' }
+        description: |-
+          Mask-addressed bit subfields over this int / byte-aligned bits field
+          (§12). Display/annotation only; value bit 0 = LSB of the decoded
+          value. The int-or-byte-aligned-bits restriction and the mask-fits-width
+          rule are validator-layer checks (§11.1).
       computedFrom:
         $ref: '#/$defs/ExprWireSize'
         description: |-
@@ -685,6 +846,18 @@ $defs:
           expression; instructs the codec to compute and fill this length
           field bottom-up after recursive encoding is complete (§4, §6).
           Using any other expression is a validation error.
+    allOf:
+      # §8/§11.1: checksumParams may only refine a CRC parameter model. Using it
+      # with a named non-CRC algorithm (internet, adler32) is a validation error —
+      # these algorithms have fixed internal parameters incompatible with the CRC set.
+      - if:
+          properties:
+            checksumAlgorithm:
+              enum: [internet, adler32]
+          required: [checksumAlgorithm]
+        then:
+          not:
+            required: [checksumParams]
 
   Virtual:
     type: object
@@ -735,6 +908,8 @@ $defs:
         description: |-
           Per-region RFC annotation { rfc?, section? } enabling LSP hover and
           per-region RFC deep-linking for this optional container (§5).
+          Available through the source AST only (§5.4): the optional is
+          transparent in the flat normalized model.
 
   Struct:
     type: object
@@ -756,7 +931,9 @@ $defs:
         description: |-
           Per-region RFC annotation { rfc?, section? } for the inline struct
           used as a Switch arm or Repeat element, enabling LSP hover and
-          per-region RFC deep-linking (§5).
+          per-region RFC deep-linking (§5). Available through the source AST
+          only (§5.4): the inline struct is transparent in the flat
+          normalized model.
       fields:
         type: array
         items:
@@ -778,6 +955,13 @@ $defs:
       doc:
         type: string
         description: Description for LSP hover and tooling documentation.
+      meta:
+        $ref: '#/$defs/FieldMeta'
+        description: |-
+          RFC annotation { rfc?, section? } for the def as a whole (§5.4, §6).
+          Documentation-grade provenance available through the source AST
+          only: a ref expansion is transparent and emits no container field,
+          so this meta does not appear in the normalized/layout output.
       recursive:
         type: boolean
         description: |-
@@ -894,10 +1078,17 @@ $defs:
         description: Human-readable note shown in the encrypted-region tooltip.
       headerProtected:
         type: array
-        description: Field ids within plaintext that are also header-protected.
+        description: |-
+          Field ids that are header-protected by the cipher: either inside this
+          plaintext, or a plaintext-external header field declared earlier in
+          this body (§5). Annotation only. The same-body resolution is a
+          validator-layer check (JSON Schema cannot express it).
         items: { type: string }
       category: { $ref: '#/$defs/CategoryToken' }
       doc:      { type: string }
+      meta:
+        $ref: '#/$defs/FieldMeta'
+        description: RFC provenance for the encrypted region (§5.4).
 
   RefContainer:
     type: object
@@ -998,6 +1189,9 @@ $defs:
         description: Ordered list of containers parsed within the scope.
       name: { type: string }
       doc:  { type: string }
+      meta:
+        $ref: '#/$defs/FieldMeta'
+        description: RFC provenance for the bounded region (§5.4).
 
   # ────────────────────────────────────────────────────────────────────
   # Constraints
@@ -1016,3 +1210,4 @@ $defs:
       lhs: { $ref: '#/$defs/Expr' }
       rhs: { $ref: '#/$defs/Expr' }
       doc: { type: string }
+      level: { $ref: '#/$defs/NormativeLevel' }

@@ -23,7 +23,8 @@ export function collectPsdlRefs(packet: Packet): Set<string> {
   const walk = (containers: Container[]): void => {
     for (const c of containers) {
       if (isField(c)) {
-        if (c.type.kind === "bytes") visit(c.type.n);
+        // A delimiter-terminated bytes length (`delimiter` form, §3) carries no Expr.
+        if (c.type.kind === "bytes" && isExpr(c.type.n)) visit(c.type.n);
         if (c.computedFrom) visit(c.computedFrom);
         continue;
       }

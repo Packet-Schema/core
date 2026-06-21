@@ -29,9 +29,15 @@ export type {
   TypeEnum,
   TypeVarint,
   TypeBerLength,
+  BytesDelimited,
   VarintEncoding,
   EnumVariant,
   EnumVariantObj,
+  Subfield,
+  NormativeLevel,
+  RfcRef,
+  UpdateRef,
+  ValueEntry,
   ChecksumAlgorithm,
   ChecksumParams,
   PseudoHeader,
@@ -95,7 +101,7 @@ export {
 } from "./expr.js";
 
 // Normalize
-export { normalize, initialEnv, typeBits, berLenEnvKey, varintBitsEnvKey, selectArm } from "./normalize.js";
+export { normalize, initialEnv, typeBits, berLenEnvKey, varintBitsEnvKey, bytesDelimLenEnvKey, isBytesDelimited, selectArm } from "./normalize.js";
 export type { NormalizeOptions } from "./normalize.js";
 
 // Layout
@@ -104,7 +110,7 @@ export type { LayoutOptions } from "./layout.js";
 
 // Constraint solver
 export { propagate, propagateFixpoint, validateConstraints } from "./constraint.js";
-export type { PropagateResult, PropagateOk, PropagateConflict } from "./constraint.js";
+export type { PropagateResult, PropagateOk, PropagateConflict, ConstraintDiagnostic } from "./constraint.js";
 
 // Validation
 export { validatePacket, validateContainer, isValidExpr } from "./validate.js";
@@ -117,3 +123,4 @@ export type { ParseResult } from "./yaml.js";
 // Utilities
 export { isField } from "./utils.js";
 export { collectPsdlRefs } from "./collect-refs.js";
+export { resolveValueEntry, matchesPattern } from "./values.js";

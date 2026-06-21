@@ -8,10 +8,12 @@ import { evalExpr, evalExprOr, exprContains, enclosingBitsEnvKey, prevIterEnvKey
 import { isField } from "./utils.js";
 import type {
   Bounded,
+  BytesDelimited,
   Container,
   Encrypted,
   Expr,
   Field,
+  FieldMeta,
   Group,
   NamedStruct,
   Normalized,
@@ -25,10 +27,28 @@ import type {
   Switch,
   Type,
   ViewMode,
+  Virtual,
 } from "./types.js";
 
 export function berLenEnvKey(fieldId: string): string {
   return `__berLen__${fieldId}`;
+}
+
+/**
+ * Decoder-injected wire byte length of a delimiter-terminated `bytes` field
+ * (§3/§10.7, D3). Keyed by the field's fully-qualified id under a dedicated
+ * namespace so it never collides with env[id] (the field's value slot) or any
+ * other injection key. With no injection (static preview) the length is unknown
+ * and the field lays out as 0 bytes.
+ */
+export function bytesDelimLenEnvKey(qid: string): string {
+  return `__bytesDelimLen__${qid}`;
+}
+
+/** True if a `bytes.n` is the delimiter form rather than an Expr (§3, D3). */
+export function isBytesDelimited(n: unknown): n is BytesDelimited {
+  return typeof n === "object" && n !== null && !Array.isArray(n) && "delimiter" in n &&
+    Array.isArray((n as { delimiter?: unknown }).delimiter);
 }
 
 /** Internal bit-accumulator mirror of wireSizeEnvKey (§4 sub-byte rounding). */
@@ -44,6 +64,15 @@ export function varintBitsEnvKey(fieldId: string): string {
 /** Maximum recursive-def expansion depth (decoder is the real authority, §6). */
 const MAX_REF_DEPTH = 64;
 
+/**
+ * Static wire bit-width of a wire type. For decoder-determined widths
+ * (`varint`, delimiter-terminated `bytes`), the width is looked up in `env`
+ * under a key derived from `fieldId`. The CALLER must pass the same id used at
+ * injection: for fields expanded inside a `ref`/`repeat` that is the qualified
+ * id (`{ref.id}.{field.id}#N`), which the normalize walk threads through emit().
+ * Calling this helper directly with a bare id for a qualified field yields 0
+ * (unknown width) — resolve such fields via the full `normalize()` walk.
+ */
 export function typeBits(type: Type, env: PacketEnv, fieldId?: string): number {
   switch (type.kind) {
     case "int":
@@ -52,6 +81,17 @@ export function typeBits(type: Type, env: PacketEnv, fieldId?: string): number {
     case "bits":
       return type.n;
     case "bytes":
+      // Delimiter-terminated bytes have a decoder-determined length
+      // injected under a qualified key; typeBits has only the bare id, so the
+      // qualified lookup happens in emit(). Without the qid the static layout is
+      // 0 bytes (unknown length, §3/§10.7, D3).
+      if (isBytesDelimited(type.n)) {
+        if (fieldId !== undefined) {
+          const v = env.get(bytesDelimLenEnvKey(fieldId));
+          if (v !== undefined) return Math.max(0, Math.trunc(v)) * 8;
+        }
+        return 0;
+      }
       return Math.max(0, Math.trunc(evalExprOr(type.n, env))) * 8;
     case "varint":
       // §3/§10: the decoder injects the varint's wire bit-width under a key
@@ -142,7 +182,7 @@ type WalkState = {
   defs: Record<string, NamedStruct>;
   encryptedStack: EncryptedFrame[];
   scopeStack: ScopeFrame[];
-  groupStack: Array<{ id: string; name: string }>;
+  groupStack: Array<{ id: string; name: string; meta?: FieldMeta }>;
   repeatIndexStack: number[];
   idPrefix: string;
   refDepth: number;
@@ -273,11 +313,39 @@ function recordWireSize(state: WalkState, id: string, bits: number): void {
   }
 }
 
+/**
+ * Apply walk-context attribution shared by every emitted NormalizedField:
+ * switch-arm key, repeat index, and enclosing-group identity/provenance (§5,
+ * §5.4). Used by emit() and by the wire-view encrypted blob so both paths
+ * agree on attribution.
+ */
+function applyWalkContext(state: WalkState, nf: NormalizedField): void {
+  // §5: every field within a selected switch arm carries the arm key, whether
+  // a direct child or nested inside a group/optional/bounded/repeat/ref.
+  if (state.switchCase !== undefined) nf.switchCase = state.switchCase;
+  if (state.repeatIndexStack.length > 0)
+    nf.repeatIndex = state.repeatIndexStack[state.repeatIndexStack.length - 1]!;
+  if (state.groupStack.length > 0) {
+    const top = state.groupStack[state.groupStack.length - 1]!;
+    const indexTag = state.repeatIndexStack.length > 0 ? state.repeatIndexStack.join("_") : null;
+    nf.groupId = indexTag !== null ? `${top.id}#${indexTag}` : top.id;
+    nf.groupName = top.name;
+    // §5.4: groupMeta is the meta of the NEAREST enclosing group that defines
+    // one (innermost wins; an outer group's meta is the fallback), so
+    // nested-group provenance still reaches every leaf when only the outer
+    // group carries meta.
+    for (let i = state.groupStack.length - 1; i >= 0; i--) {
+      const frame = state.groupStack[i]!;
+      if (frame.meta !== undefined) { nf.groupMeta = frame.meta; break; }
+    }
+  }
+}
+
 function emit(state: WalkState, field: Field, path: string): void {
   const frame = injectScopeBudget(state);
   // §4/§11.2: sizing a `bytes` field from `remaining` while the cursor is
   // mid-byte is a runtime error.
-  if (field.type.kind === "bytes") {
+  if (field.type.kind === "bytes" && !isBytesDelimited(field.type.n)) {
     const nExpr: Expr = field.type.n;
     // §4/§11.2: top-level `remaining`/`enclosingBits` with no injected total.
     guardScopeBudget(state, frame, nExpr);
@@ -286,10 +354,14 @@ function emit(state: WalkState, field: Field, path: string): void {
         `normalize: 'remaining' sizes bytes field "${field.id}" while the cursor is mid-byte (offset ${state.offset} bits); insert an 'align' first (§11.2).`,
       );
   }
-  const bits = typeBits(field.type, state.env, field.id);
   const prefix = state.idPrefix ? `${state.idPrefix}.` : "";
   const suffix = repeatSuffix(state);
   const id = `${prefix}${field.id}${suffix}`;
+  // §3/§10.7 (D3): a delimiter-terminated `bytes` length is injected under the
+  // qualified id; without injection the static layout is 0 bytes (unknown).
+  const bits = (field.type.kind === "bytes" && isBytesDelimited(field.type.n))
+    ? Math.max(0, Math.trunc(state.env.get(bytesDelimLenEnvKey(id)) ?? 0)) * 8
+    : typeBits(field.type, state.env, field.id);
   const nf: NormalizedField = {
     id,
     name: field.name,
@@ -298,11 +370,20 @@ function emit(state: WalkState, field: Field, path: string): void {
     originalContainerPath: path,
     ...(field.category !== undefined ? { category: field.category } : {}),
     ...(field.doc !== undefined ? { doc: field.doc } : {}),
-    // §5: every field within a selected switch arm carries the arm key, whether
-    // a direct child or nested inside a group/optional/bounded/repeat/ref.
-    ...(state.switchCase !== undefined ? { switchCase: state.switchCase } : {}),
-    ...(state.repeatIndexStack.length > 0 ? { repeatIndex: state.repeatIndexStack[state.repeatIndexStack.length - 1] } : {}),
+    // §5.3/§5.4: value dictionary and RFC provenance ride through to the
+    // normalized/layout output so LSP and renderers can surface them.
+    ...(field.values !== undefined ? { values: field.values } : {}),
+    ...(field.meta !== undefined ? { meta: field.meta } : {}),
+    // §12 (D4): mask-addressed subfields ride through for LSP/codegen value decode.
+    ...(field.subfields !== undefined ? { subfields: field.subfields } : {}),
+    // §8: checksum binding rides through so codegen/LSP can read the algorithm,
+    // covered fields, pseudo-header, and CRC parameters (width included).
+    ...(field.checksumAlgorithm !== undefined ? { checksumAlgorithm: field.checksumAlgorithm } : {}),
+    ...(field.checksumCovers !== undefined ? { checksumCovers: field.checksumCovers } : {}),
+    ...(field.checksumPseudoHeader !== undefined ? { checksumPseudoHeader: field.checksumPseudoHeader } : {}),
+    ...(field.checksumParams !== undefined ? { checksumParams: field.checksumParams } : {}),
   };
+  applyWalkContext(state, nf);
   if (state.encryptedStack.length > 0) {
     const top = state.encryptedStack[state.encryptedStack.length - 1]!;
     nf.encryptedParentId = top.parentId;
@@ -312,12 +393,6 @@ function emit(state: WalkState, field: Field, path: string): void {
     }
   }
   if (field.byteOrder) nf.byteOrder = field.byteOrder;
-  if (state.groupStack.length > 0) {
-    const top = state.groupStack[state.groupStack.length - 1]!;
-    const indexTag = state.repeatIndexStack.length > 0 ? state.repeatIndexStack.join("_") : null;
-    nf.groupId = indexTag !== null ? `${top.id}#${indexTag}` : top.id;
-    nf.groupName = top.name;
-  }
   state.out.push(nf);
   state.env.set(id, state.env.get(id) ?? state.env.get(field.id) ?? field.const ?? field.defaultValue ?? 0);
   state.offset += bits;
@@ -334,7 +409,7 @@ function walkContainer(c: Container, path: string, state: WalkState): void {
     case "encrypted": walkEncrypted(c, path, state); return;
     case "bounded": walkBounded(c, path, state); return;
     case "align": walkAlign(c, state); return;
-    case "virtual": walkVirtual(c, state); return;
+    case "virtual": walkVirtual(c, path, state); return;
     case "optional": {
       const test = evalIn(state, c.when);
       if (test !== 0) walkContainer(c.container, path, state);
@@ -344,18 +419,29 @@ function walkContainer(c: Container, path: string, state: WalkState): void {
   }
 }
 
-function walkVirtual(v: { kind: "virtual"; id: string; expr: Expr }, state: WalkState): void {
+function walkVirtual(v: Virtual, path: string, state: WalkState): void {
   const value = evalIn(state, v.expr);
+  // Expressions reference the bare id; also record the qualified id so virtuals
+  // inside a ref expansion / repeat iteration stay distinguishable.
   state.env.set(v.id, value);
-  // Zero-width; recorded as a virtual normalized field for tooling.
-  state.out.push({
-    id: v.id,
-    name: v.id,
+  const qid = qualify(state, v.id);
+  if (qid !== v.id) state.env.set(qid, value);
+  // Zero-width; recorded as a virtual normalized field for tooling. The
+  // authored name/doc ride through for LSP hover (§5). The walk path is
+  // recorded like every other emitted field so (a) an LSP can trace the
+  // virtual to its source container, and (b) a virtual inside a group does
+  // not split the group's consecutive run in the layout collapse (§5.4).
+  const nf: NormalizedField = {
+    id: qid,
+    name: v.name ?? v.id,
     bits: 0,
     absoluteBitOffset: state.offset,
-    originalContainerPath: `${v.id}`,
+    originalContainerPath: path,
     virtual: true,
-  });
+    ...(v.doc !== undefined ? { doc: v.doc } : {}),
+  };
+  applyWalkContext(state, nf);
+  state.out.push(nf);
 }
 
 function walkAlign(a: { kind: "align"; to: number }, state: WalkState): void {
@@ -411,7 +497,7 @@ function walkRef(r: RefContainer, path: string, state: WalkState): void {
 function walkGroup(g: Group, path: string, state: WalkState): void {
   const sub = `${path}/${g.id}`;
   const prev = state.groupStack;
-  state.groupStack = [...prev, { id: g.id, name: g.name ?? g.id }];
+  state.groupStack = [...prev, { id: g.id, name: g.name ?? g.id, ...(g.meta !== undefined ? { meta: g.meta } : {}) }];
   const startOffset = state.offset;
   for (const child of g.children) walkContainer(child, sub, state);
   recordWireSize(state, g.id, state.offset - startOffset);
@@ -658,23 +744,52 @@ export function selectArm(
   return undefined;
 }
 
+/**
+ * §5 (D6): tag plaintext-external header-protected fields. A headerProtected id
+ * that names a field declared earlier in the same body (not a plaintext field)
+ * is tagged on the already-emitted NormalizedField. Matching is by exact
+ * emitted id (a top-level/direct header field emits with id === its bare id),
+ * so a ref-expanded leaf with the same tail is NOT over-matched. Plaintext-
+ * internal ids are tagged separately during the plaintext walk (emit, via the
+ * encryptedStack frame). Same set in both views for fields emitted as leaves.
+ */
+function tagExternalHeaderProtected(e: Encrypted, state: WalkState): void {
+  if (!e.headerProtected || e.headerProtected.length === 0) return;
+  const plaintextIds = new Set<string>();
+  for (const c of e.plaintext.fields) if (isField(c)) plaintextIds.add(c.id);
+  for (const hp of e.headerProtected) {
+    if (plaintextIds.has(hp)) continue; // plaintext-internal: handled in emit()
+    for (const nf of state.out) {
+      if (nf.id === hp) { nf.headerProtected = true; break; }
+    }
+  }
+}
+
 function walkEncrypted(e: Encrypted, path: string, state: WalkState): void {
   const sub = `${path}/${e.id}`;
+  tagExternalHeaderProtected(e, state);
   if (state.viewMode === "wire") {
     const bits = e.wireBits !== undefined
       ? Math.max(0, Math.trunc(evalIn(state, e.wireBits)))
       : sumPlaintextBits(e, state);
     const nf: NormalizedField = {
-      id: e.id,
+      // Same qualification as emit(): ref prefix + repeat suffix, so repeat
+      // iterations / sibling ref expansions never collide on the blob id (§5).
+      id: qualify(state, e.id),
       name: e.name ?? e.id,
       bits,
       absoluteBitOffset: state.offset,
       originalContainerPath: sub,
       ...(e.category !== undefined ? { category: e.category } : {}),
       ...(e.doc !== undefined ? { doc: e.doc } : {}),
+      // §5.4: the encrypted region's RFC provenance rides on the wire-view
+      // blob, same as field.meta in emit().
+      ...(e.meta !== undefined ? { meta: e.meta } : {}),
       encrypted: true,
       ...(e.contextNote !== undefined ? { encryptedContextNote: e.contextNote } : {}),
     };
+    // Switch-arm / repeat / group attribution, identical to emit() (§5, §5.4).
+    applyWalkContext(state, nf);
     if (state.encryptedStack.length > 0)
       nf.encryptedParentId = state.encryptedStack[state.encryptedStack.length - 1]!.parentId;
     state.out.push(nf);

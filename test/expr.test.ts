@@ -26,6 +26,15 @@ describe("evalExpr — arithmetic", () => {
     expect(() => evalExpr(op("%", lit(1), lit(0)), env())).toThrow(/modulo by zero/);
   });
 
+  // C6/§4: `%` is paired with truncated-toward-zero division, so the remainder
+  // takes the sign of the dividend (JS remainder), NOT the Euclidean result.
+  // Pin this so the spec wording and the implementation stay aligned.
+  it("modulo takes the sign of the dividend (truncated, not Euclidean)", () => {
+    expect(evalExpr(op("%", lit(-7), lit(3)), env())).toBe(-1); // not Euclidean 2
+    expect(evalExpr(op("%", op("-", lit(1), lit(3)), lit(4)), env())).toBe(-2); // not 2
+    expect(evalExpr(op("%", lit(7), lit(-3)), env())).toBe(1);
+  });
+
   it("comparisons yield 0/1", () => {
     expect(evalExpr(op("==", lit(4), lit(4)), env())).toBe(1);
     expect(evalExpr(op("<", lit(4), lit(2)), env())).toBe(0);

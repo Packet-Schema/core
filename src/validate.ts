@@ -93,8 +93,8 @@ function isValidRfcRef(v: unknown): boolean {
 
 /** FieldMeta keys (schema FieldMeta, `additionalProperties: false`). */
 const FIELD_META_KEYS: ReadonlySet<string> = new Set(["rfc", "section"]);
-/** PacketMeta keys (schema PacketMeta additionally allows `aliases`). */
-const PACKET_META_KEYS: ReadonlySet<string> = new Set(["rfc", "section", "aliases"]);
+/** PacketMeta keys (schema PacketMeta additionally allows `aliases`, `tags`, `family`). */
+const PACKET_META_KEYS: ReadonlySet<string> = new Set(["rfc", "section", "aliases", "tags", "family"]);
 
 /**
  * Lightweight `meta` shape check (§5.4), mirroring the schema's FieldMeta /
@@ -118,7 +118,8 @@ function validateMeta(
     if (!allowedKeys.has(key))
       errors.push({ message: `${ctx}: meta has unknown key "${key}" (allowed: ${[...allowedKeys].join(", ")}) (§5.4).` });
   }
-  const { rfc, section, aliases } = meta as { rfc?: unknown; section?: unknown; aliases?: unknown };
+  const { rfc, section, aliases, tags, family } = meta as
+    { rfc?: unknown; section?: unknown; aliases?: unknown; tags?: unknown; family?: unknown };
   if (rfc !== undefined && !isValidRfcRef(rfc))
     errors.push({ message: `${ctx}: meta.rfc must be an integer or { defined, updates? } where each updates entry is an integer or { rfc, section? } (§5.4).` });
   if (section !== undefined && typeof section !== "string")
@@ -126,6 +127,13 @@ function validateMeta(
   if (allowedKeys.has("aliases") && aliases !== undefined &&
       (!Array.isArray(aliases) || !aliases.every((a) => typeof a === "string")))
     errors.push({ message: `${ctx}: meta.aliases must be an array of strings.` });
+  // §1.1: free-form catalog classification — the language checks only the shape
+  // (string[] / string); the vocabulary is governed by the catalog layer.
+  if (allowedKeys.has("tags") && tags !== undefined &&
+      (!Array.isArray(tags) || !tags.every((t) => typeof t === "string")))
+    errors.push({ message: `${ctx}: meta.tags must be an array of strings (§1.1).` });
+  if (allowedKeys.has("family") && family !== undefined && typeof family !== "string")
+    errors.push({ message: `${ctx}: meta.family must be a string (§1.1).` });
 }
 
 /* ------------------------------------------------------------------ *

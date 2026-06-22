@@ -82,11 +82,24 @@ another document's `name` (see §7 for the resolution priority).
 meta:
   rfc: 791          # RFC number (integer)
   section: "3.1"    # RFC section (string)
-  aliases: [ip, ipv4]   # alternative names for this packet type
+  aliases: [ip, ipv4]       # alternative names for this packet type
+  family: ipv4              # optional single grouping key for related documents
+  tags: [internet-layer, addressing]   # free-form classification tags
 ```
 
 All fields are optional. Used by codegen, Chrome extension, and LSP for
 disambiguation and cross-reference.
+
+**Classification (`tags`, `family`).** For catalogs/registries that hold many
+documents, `meta.tags` (a free-form `string[]`) and `meta.family` (an optional
+single grouping key) classify a packet for grouping, search, and layered
+listing — e.g. grouping the several BGP message documents under `family: bgp`,
+or filtering by a `transport` tag. These are deliberately **open** (like
+`aliases`, unlike the closed field-level `category` tokens of §5.1): the
+language fixes only the *shape* (`string[]` / `string`) and never the
+*vocabulary*. A controlled term list, if a catalog wants one, is governed by the
+catalog/tooling layer (lint), not by PSDL — so adding a classification term
+never requires a language change.
 
 **Multi-layer RFC provenance.** `meta.rfc` also accepts an object
 `{ defined, updates? }` that records the defining RFC and the chain of RFCs that

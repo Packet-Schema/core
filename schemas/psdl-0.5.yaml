@@ -110,7 +110,7 @@ $defs:
   PacketMeta:
     type: object
     additionalProperties: false
-    description: RFC and alias metadata for tooling (codegen, Chrome extension, LSP).
+    description: RFC, alias, and classification metadata for tooling (codegen, Chrome extension, LSP, catalog).
     properties:
       rfc:
         $ref: '#/$defs/RfcRef'
@@ -122,6 +122,16 @@ $defs:
         type: array
         items: { type: string }
         description: Alternative names for this packet type.
+      tags:
+        type: array
+        items: { type: string }
+        description: >-
+          Free-form classification tags for catalog grouping/search (§1.1).
+          Multi-axis; the vocabulary is governed by the catalog layer, not the
+          schema (open strings, like aliases — unlike the closed field `category`).
+      family:
+        type: string
+        description: Optional single grouping key for a family of related packet types (e.g. "bgp") (§1.1).
 
   # ────────────────────────────────────────────────────────────────────
   # Normative levels and RFC provenance

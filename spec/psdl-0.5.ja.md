@@ -81,10 +81,21 @@ defs: {}
 meta:
   rfc: 791          # RFC 番号（整数）
   section: "3.1"    # RFC セクション（文字列）
-  aliases: [ip, ipv4]   # このパケット型の別名リスト
+  aliases: [ip, ipv4]       # このパケット型の別名リスト
+  family: ipv4              # 関連文書を束ねる任意の単一グルーピングキー
+  tags: [internet-layer, addressing]   # 自由形式の分類タグ
 ```
 
 全フィールドは省略可能。codegen・Chrome extension・LSP による識別・相互参照に使用。
+
+**分類（`tags`・`family`）。** 多数の文書を抱えるカタログ/レジストリ向けに、
+`meta.tags`（自由形式の `string[]`）と `meta.family`（任意の単一グルーピングキー）は
+パケットをグルーピング・検索・層別表示のために分類する — 例: 複数の BGP メッセージ文書を
+`family: bgp` で束ねる、`transport` タグで絞り込む、など。これらは意図的に**開いている**
+（`aliases` と同様。§5.1 の閉じたフィールド `category` トークンとは異なる）: 言語は
+*形*（`string[]` / `string`）だけを固定し、*語彙*は縛らない。統制された用語リストが
+必要なら、それは PSDL ではなくカタログ/ツール層（lint）が管理する — よって分類用語の
+追加で言語を変更する必要はない。
 
 `meta.rfc` は素の RFC 番号(従来の 0.5 形式)に加え、オブジェクト
 `{ defined, updates? }` による多層 RFC provenance も受け付ける(§5.4)。各 `updates`

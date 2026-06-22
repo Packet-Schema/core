@@ -447,6 +447,19 @@ export type PacketMeta = {
   rfc?: RfcRef;
   section?: string;
   aliases?: string[];
+  /**
+   * Free-form classification tags for catalog/registry grouping and search
+   * (§1.1). Multi-axis (layer, function, transport, …); the spec deliberately
+   * does NOT constrain the vocabulary — a controlled term list, if any, is
+   * governed by the catalog/tooling layer, not the language. Like `aliases`,
+   * these are open strings, unlike the closed field-level `category` tokens.
+   */
+  tags?: string[];
+  /**
+   * Optional single grouping key for a family of related packet types
+   * (e.g. `bgp` for the several BGP message documents). Free-form (§1.1).
+   */
+  family?: string;
 };
 
 export type ImportEntry = {

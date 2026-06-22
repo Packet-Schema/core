@@ -97,6 +97,13 @@ describe("JSON Schema — psdl-0.5.yaml", () => {
     expect(validate({ name: "t", meta: { rfc: { updates: [2474] } }, body: [] })).toBe(false);
   });
 
+  it("accepts free-form classification tags/family on packet meta (§1.1)", () => {
+    expect(validate({ name: "t", meta: { rfc: 4271, family: "bgp", tags: ["routing", "tcp-based"] }, body: [] })).toBe(true);
+    // shape is enforced: tags is string[], family is string
+    expect(validate({ name: "t", meta: { tags: "routing" }, body: [] })).toBe(false);
+    expect(validate({ name: "t", meta: { family: ["bgp"] }, body: [] })).toBe(false);
+  });
+
   it("fixes the RfcRef acceptance boundary (§5.4)", () => {
     // Empty updates list is accepted (no minItems).
     expect(validate({ name: "t", meta: { rfc: { defined: 791, updates: [] } }, body: [] })).toBe(true);

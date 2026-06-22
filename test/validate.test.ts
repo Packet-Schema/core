@@ -807,6 +807,18 @@ describe("validatePacket — meta key/shape parity with the schema (§5.4)", () 
     expect(msgs(fieldWithMeta({ rfc: 791, aliases: ["F"] }))
       .some((m) => /meta has unknown key "aliases"/.test(m))).toBe(true);
   });
+  it("packet meta accepts free-form classification tags/family; checks only shape (§1.1)", () => {
+    expect(msgs({ name: "t", body: [], meta: { rfc: 4271, family: "bgp", tags: ["routing", "tcp-based"] } })).toEqual([]);
+    expect(msgs({ name: "t", body: [], meta: { tags: "routing" } as never })
+      .some((m) => /meta\.tags must be an array of strings/.test(m))).toBe(true);
+    expect(msgs({ name: "t", body: [], meta: { tags: ["ok", 5] } as never })
+      .some((m) => /meta\.tags must be an array of strings/.test(m))).toBe(true);
+    expect(msgs({ name: "t", body: [], meta: { family: ["bgp"] } as never })
+      .some((m) => /meta\.family must be a string/.test(m))).toBe(true);
+    // tags/family are packet-level only — not allowed on field meta
+    expect(msgs(fieldWithMeta({ tags: ["x"] }))
+      .some((m) => /meta has unknown key "tags"/.test(m))).toBe(true);
+  });
 });
 
 describe("validatePacket — ValueEntry unknown keys (§5.3)", () => {

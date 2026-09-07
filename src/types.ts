@@ -393,7 +393,8 @@ export type Align = {
   kind: "align";
   /** Boundary in bits; must be a positive power of 2 that is a multiple of 8. */
   to: number;
-  /** Padding byte value, 0–255 (default 0). */
+  /** Padding byte value, 0–255. Absent means the fill is encoder/decoder-defined
+   *  — NOT 0 (§5 `spec/psdl-0.5.md:1542`, `schemas/psdl-0.5.yaml:1164`). */
   fill?: number;
   id?: string;
   doc?: string;

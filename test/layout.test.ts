@@ -75,9 +75,18 @@ describe("resolveLayout — rowBits validation", () => {
     expect(() => resolveLayout(pkt)).toThrow(/rowBits must be a positive integer/);
   });
 
-  it("throws when rowBits is absent", () => {
-    const pkt: Packet = { name: "t", body: [] };
-    expect(() => resolveLayout(pkt)).toThrow(/rowBits must be a positive integer/);
+  it("falls back to 32 when rowBits is absent", () => {
+    // §13 / schemas/psdl-0.5.yaml: a packet without `rowBits` is a valid PSDL
+    // document and renderers fall back to 32. A 40-bit field must therefore
+    // wrap at 32 bits into two segments, exactly as `rowBits: 32` would.
+    const pkt: Packet = {
+      name: "t",
+      body: [{ id: "a", name: "A", type: { kind: "int", bits: 40 } }],
+    };
+    const { cells } = resolveLayout(pkt);
+    expect(cells).toHaveLength(2);
+    expect(cells[0]).toMatchObject({ row: 0, startBit: 0, endBit: 31 });
+    expect(cells[1]).toMatchObject({ row: 1, startBit: 0, endBit: 7 });
   });
 });
 

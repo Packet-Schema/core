@@ -1,0 +1,66 @@
+name: release
+
+# Tag-driven npm publish.
+#
+#     npm version patch          # bumps package.json, commits, creates vX.Y.Z
+#     git push --follow-tags
+#
+# The tag is the release record. Before this workflow existed, 0.1.0 was
+# published by hand and there was no way to tell which commit produced it —
+# no tags, no CHANGELOG, no publish workflow. A tag plus npm provenance
+# (`publishConfig.provenance`, which needs the `id-token` permission below)
+# now ties every published version back to a commit and a workflow run.
+#
+# Authentication is npm Trusted Publishing (OIDC): there is no NPM_TOKEN.
+# One-time setup on npmjs.com, per package:
+#     @packet-schema/core → Settings → Trusted Publisher → GitHub Actions
+#         repository: Packet-Schema/core
+#         workflow:   release.yml
+# Nothing to rotate, and nothing that silently breaks when a secret is missing
+# — which is exactly how the presets CI stayed red for three months.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    name: Publish to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # Required for OIDC trusted publishing AND for provenance attestation.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      # Trusted publishing needs npm >= 11.5.1. Node 24 ships npm 11.x, but
+      # pin it so a runner image change cannot silently drop OIDC support.
+      - name: Ensure npm supports trusted publishing
+        run: |
+          npm install -g npm@^11
+          npm --version
+
+      - run: npm ci
+
+      # A tag that disagrees with package.json is how you publish the wrong
+      # version. Refuse rather than guess.
+      - name: Verify tag matches package.json
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG="$(node -p "require('./package.json').version")"
+          echo "tag=$TAG  package.json=$PKG"
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag v$TAG does not match package.json $PKG"
+            exit 1
+          fi
+
+      # `prepublishOnly` runs typecheck + test + build, so the gate is identical
+      # whether this runs here or on someone's laptop.
+      - run: npm publish

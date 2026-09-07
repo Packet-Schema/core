@@ -1,6 +1,6 @@
 {
   "name": "@packet-schema/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "PSDL core — types, expression evaluator, normalize, layout, constraint solver, and YAML I/O",
   "license": "MIT",
   "author": "Taquan Aoki",
@@ -11,6 +11,10 @@
   "homepage": "https://github.com/Packet-Schema/core#readme",
   "bugs": {
     "url": "https://github.com/Packet-Schema/core/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "type": "module",
   "main": "./dist/index.js",
@@ -31,7 +35,8 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {
     "yaml": "^2.7.1"

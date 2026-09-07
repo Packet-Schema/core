@@ -19,8 +19,14 @@ export type LayoutOptions = {
   viewMode?: ViewMode;
 };
 
+// §13 and schemas/psdl-0.5.yaml both state that a packet WITHOUT `rowBits` is a
+// valid PSDL document and that renderers fall back to 32. Defaulting to 0 here
+// made the reference implementation throw on a document the spec calls valid,
+// and every downstream renderer had to re-implement the fallback to compensate.
+// An explicit `rowBits: 0` is still rejected below — `??` only fills in an
+// absent value, so a caller that deliberately passes 0 keeps the error.
 function resolveRowBits(packet: PsdlPacket): number {
-  return packet.rendererHints?.rowBits ?? packet.rowBits ?? 0;
+  return packet.rendererHints?.rowBits ?? packet.rowBits ?? 32;
 }
 
 export function resolveLayout(

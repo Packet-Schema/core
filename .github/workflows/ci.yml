@@ -8,6 +8,10 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    # Least privilege, matching the visualizer workflows. Without an explicit
+    # block the job inherits the repository default, which can be read/write.
+    permissions:
+      contents: read
     strategy:
       matrix:
         node: [20, 22]

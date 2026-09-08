@@ -116,6 +116,10 @@ export type { PropagateResult, PropagateOk, PropagateConflict, ConstraintDiagnos
 export { validatePacket, validateContainer, isValidExpr } from "./validate.js";
 export type { ValidationError } from "./validate.js";
 
+// Lint (§11.4) — advisory, separate from the hard errors above.
+export { lintPacket } from "./lint.js";
+export type { LintWarning, LintRule } from "./lint.js";
+
 // YAML I/O
 export { parsePsdl, stringifyPsdl } from "./yaml.js";
 export type { ParseResult } from "./yaml.js";

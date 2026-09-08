@@ -3,6 +3,10 @@
 ネットワークプロトコルのワイヤフォーマットを記述するための YAML ベースの言語。
 機械可読な正式スキーマは `schemas/psdl-0.5.yaml` を参照。
 
+**この文書は参考訳であり、規範ではない。** 正典は `psdl-0.5.md`（英語版）で、
+両者が食い違う場合は英語版が優先する。言語仕様の変更はまず英語版に入り、
+訳はそれに追随する。
+
 ---
 
 ## 1. ドキュメント構造
@@ -446,7 +450,8 @@ type: { kind: berLength, maxBytes: 3 }
 式が期待される場所ではベア YAML 整数も使えるオーサリング省略形：
 
 ```yaml
-count: 4          # { kind: lit, value: 4 } と等価
+count: 4                           # { kind: lit, value: 4 } と等価
+type: { kind: bytes, n: 0 }        # n: 0 は n: { kind: lit, value: 0 } と等価
 ```
 
 **値ドメイン。** 式の値は整数である。実装は閉区間 `[0, 2^53−1]`（および `−` や符号付き
@@ -1091,7 +1096,6 @@ encrypted と並ぶ）。
 | `ref` | yes | ターゲット def 名（ローカル `defs` キーまたはインポート修飾、§1.2） |
 | `id` | yes | インスタンス化 id；展開後のフィールド id のプレフィックスになる |
 | `name` | no | 人間が読めるラベル |
-| `doc` | no | LSP ホバー用の説明 |
 
 展開ルール（透明なスコープ継承、`{ref.id}.{field.id}` および repeat インデックス付き
 `{ref.id}.{field.id}#N` の id 形式）は §6 を参照。
@@ -1312,10 +1316,30 @@ switch は下記の空 struct ルールに従ってゼロバイトを消費す�
   id: payload
   on: { kind: ref, field: protocol }
   cases:
-    "6":    { id: tcp,     fields: [...] }
-    "17,136": { id: udp,   fields: [...] }
-    "0-9":  { id: raw09,   fields: [...] }
-    _:      { id: unknown, fields: [...] }
+    "6":
+      id: tcp
+      fields:
+        - id: srcPort
+          name: 送信元ポート
+          type: { kind: int, bits: 16 }
+    "17,136":
+      id: udp
+      fields:
+        - id: srcPort
+          name: 送信元ポート
+          type: { kind: int, bits: 16 }
+    "0-9":
+      id: raw09
+      fields:
+        - id: data
+          name: データ
+          type: { kind: bytes, n: { kind: ref, field: totalLength } }
+    _:
+      id: unknown
+      fields:
+        - id: data
+          name: データ
+          type: { kind: bytes, n: { kind: ref, field: totalLength } }
 ```
 
 > **注意：** `_` キーは `cases` マップの中に記述する。`default` という別プロパティは存在しない。
@@ -1497,6 +1521,7 @@ bounded 領域の meta と同様、ソース AST 経由でのみ得られる、�
       - id: contentType
         name: Content Type
         type: { kind: int, bits: 8 }
+        category: identifier
       - id: data
         name: Application Data
         type: { kind: bytes, n: { kind: ref, field: length } }
@@ -1947,7 +1972,8 @@ IPv4/TCP の例がどちらでも機能する理由である；CRC アルゴリ�
 | `crc16` | CRC-16 / IBM |
 | `adler32` | Adler-32 |
 
-このリストにないアルゴリズムには任意の文字列が使える。コーデックが実装する責務を持つ。
+このリストにないアルゴリズムには任意の文字列が使える。コーデックが実装する責務を持ち、
+PSDL は `checksumParams` が併記されない限りそれを不透明なものとして扱う。
 
 ### アルゴリズムパラメータ（`checksumParams`）
 
@@ -2061,8 +2087,14 @@ checksumCovers: [commonHeader, chunks]
 
 ### 擬似ヘッダ（`checksumPseudoHeader`）
 
+TCP と UDP のチェックサムは、TCP/UDP パケット定義には含まれない、囲んでいる
+IP ヘッダのバイト列を計算に含める。
+
 ```yaml
 - id: checksum
+  name: Checksum
+  type: { kind: int, bits: 16 }
+  category: checksum
   checksumAlgorithm: internet
   checksumPseudoHeader: ipv4
   checksumCovers: [srcPort, dstPort, dataOffset, flags, windowSize,
@@ -2073,6 +2105,9 @@ checksumCovers: [commonHeader, chunks]
 |----|----------------|
 | `ipv4` | src addr、dst addr、ゼロ、プロトコル、セグメント長（RFC 793 §3.1） |
 | `ipv6` | src addr、dst addr、上位レイヤパケット長、ゼロ、next header（RFC 2460 §8.1） |
+
+擬似ヘッダの値は、コーデックがシリアライズ／デシリアライズ時に、囲んでいる
+レイヤから解決する。
 
 ---
 
@@ -2388,9 +2423,6 @@ repeat インデックスサフィックス、`{prefix}.{id}#N`。多段の入�
 | `int` でもバイト整列 `bits` でもないフィールドの `subfields`（§12） | 検証エラー |
 | `subfields` の `mask` がフィールドの宣言ビット幅に収まらない（`mask ≥ 2^bits`）（§12） | 検証エラー |
 | `subfields` の `mask` が非負整数でも `^0x[0-9A-Fa-f]+$` 16進文字列でもない（§12） | 検証エラー |
-| フィールド id が複数の `rendererHints.sections` エントリに現れる | 検証エラー |
-| `rendererHints.sections` エントリの `fields` リストが空 | 検証エラー |
-| `rendererHints.sections.fields` エントリがトップレベル body コンテナまたはフィールド id に対応しない | 検証エラー |
 | `align` コンテナの `to` 値が 8 の倍数である正の 2 のべき乗でない | 検証エラー |
 | `lookup` テーブルキーが非負の 10 進数整数でない | 検証エラー |
 | `lookup` テーブル値が非負の 10 進数整数でない | 検証エラー |
@@ -2465,6 +2497,12 @@ repeat インデックスサフィックス、`{prefix}.{id}#N`。多段の入�
 ---
 
 ## 12. バイトオーダー
+
+`byteOrder` は 2 つのレベルに書ける:
+- **パケットレベル** — すべてのマルチバイトフィールドの既定値。
+- **フィールドレベル** — `int` と `enum` について、パケットの既定値を上書きする。
+
+### 型ごとの適用可否
 
 | 型 | パケットレベル適用？ | フィールドレベルオーバーライド？ |
 |-----|---------------------|-------------------------------|
@@ -2549,6 +2587,12 @@ body:
       - { id: frameType,    name: Frame Type,         mask: 0x0007, category: type,
           values: [ { value: 1, label: Data }, { value: 2, label: Ack } ] }
       - { id: secEnabled,   name: Security Enabled,    mask: 0x0008, category: flags }
+      - { id: framePending, name: Frame Pending,       mask: 0x0010, category: flags }
+      - { id: ackReq,       name: Ack Request,         mask: 0x0020, category: flags }
+      - { id: panIdComp,    name: PAN ID Compression,  mask: 0x0040, category: flags }
+      - { id: reserved,     name: Reserved,            mask: 0x0380, category: reserved }
+      - { id: destAddrMode, name: Dest Addr Mode,      mask: 0x0C00, category: type }
+      - { id: frameVersion, name: Frame Version,       mask: 0x3000, category: identifier }
       - { id: srcAddrMode,  name: Src Addr Mode,       mask: 0xC000, category: type }
 ```
 
@@ -2574,6 +2618,9 @@ rendererHints:
     - id: pathAttrs
       label: Path Attributes
       fields: [pathAttrLen, pathAttrs]
+    - id: nlri
+      label: NLRI
+      fields: [nlri]
 ```
 
 | プロパティ | デフォルト | 説明 |
@@ -2603,13 +2650,20 @@ rendererHints:
 | Bounded `id` | bounded スコープコンテナをセクションに割り当てる |
 | Encrypted `id` | encrypted コンテナをセクションに割り当てる |
 
-その他の値（body コンテナまたはフィールド id に対応しない id を含む）は検証エラー（§11.1 参照）。
+**位置づけ：メタデータのみ。** §7 の `next` マップと同様、`sections` は参照バリデータが
+一切チェックしないメタデータであり、これをどう消費するか — 不正なエントリをどう扱うか
+も含めて — はツール層の責務である。上記の shape は、整形式なドキュメントの読み方を
+ツール間で揃えるために規範的だが、これを外したからといってドキュメントが無効になる
+わけではない。
 
-**セクションのルール：**
+相互運用のために意図されている読み方は次のとおり：
 
-- セクションの `fields` リストは空であってはならない。フィールド id がゼロのセクションは
-  検証エラー。
-- フィールド id は複数のセクションに現れてはならない。重複リストは検証エラー。
+- セクションの `fields` リストは空でないことが期待される。フィールド id がゼロの
+  セクションは何もラベル付けしない。
+- フィールド id は高々 1 つのセクションに現れることが期待される。重複に遭遇した
+  レンダラーは最初のリストを採用し、残りを無視すること（SHOULD）。
+- どの body コンテナ・フィールドも指さないエントリは割り当て先が無いので、
+  無視すること（SHOULD）。
 - `rendererHints.sections` のセクション順序は body フィールド順序から独立しており、
   希望する表示順のみを表す。レンダラーはリストの順にセクションを表示し（SHOULD）、
   各セクション内のフィールドは `fields` リストで示された順に表示すること（SHOULD）。
@@ -2618,6 +2672,9 @@ rendererHints:
 ---
 
 ## 14. コード生成ヒント
+
+コードジェネレータ（Wireshark、scapy など）が使うプロパティ。ワイヤ上の
+意味は持たない。
 
 ### `abbrev` — プロトコルフィルタ名
 

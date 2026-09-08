@@ -1471,3 +1471,26 @@ describe("checksumCovers (§8/§11.1)", () => {
     expect(errs.some((e) => /import-qualified def name/.test(e.message))).toBe(true);
   });
 });
+
+describe("imports × defs namespace collision (§1.2/§6)", () => {
+  const pkt = (defsKey: string): Packet => ({
+    name: "t",
+    rowBits: 32,
+    imports: [{ source: "./addr.psdl.yaml", as: "addr" }],
+    defs: {
+      [defsKey]: { id: defsKey, fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] },
+    },
+    body: [{ kind: "ref", ref: defsKey, id: "inst", name: "Inst" }],
+  });
+
+  it("rejects an 'as' prefix that shadows a local defs key", () => {
+    // `addr.ipv4Addr` would be ambiguous: imported def, or a dotted reach into
+    // the local def `addr`? Nothing in the grammar separates them.
+    const errs = validatePacket(pkt("addr"));
+    expect(errs.some((e) => /collides with a local defs key/.test(e.message))).toBe(true);
+  });
+
+  it("accepts a prefix that does not collide", () => {
+    expect(validatePacket(pkt("other")).some((e) => /collides/.test(e.message))).toBe(false);
+  });
+});

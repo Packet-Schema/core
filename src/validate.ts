@@ -26,10 +26,10 @@ const DECIMAL_INT_RE = /^(0|[1-9][0-9]*)$/;
 /** Ternary bit-pattern for ValueEntry.pattern (§5.3): 0, 1, or x/X. */
 const PATTERN_RE = /^[01xX]+$/;
 const SWITCH_KEY_RE = /^(_|(0|[1-9][0-9]*)|(0|[1-9][0-9]*)-(0|[1-9][0-9]*)|(0|[1-9][0-9]*)(,(0|[1-9][0-9]*))+)$/;
-/** Hex-string form for wide checksum params (§8, D9): `^0x[0-9A-Fa-f]+$`. */
+/** Hex-string form for wide checksum params (§8): `^0x[0-9A-Fa-f]+$`. */
 const HEX_PARAM_RE = /^0x[0-9A-Fa-f]+$/;
 
-/** True if a `bytes.n` is the delimiter form, however malformed (§3, D3). */
+/** True if a `bytes.n` is the delimiter form, however malformed (§3). */
 function isBytesDelimitedShape(n: unknown): boolean {
   return typeof n === "object" && n !== null && !Array.isArray(n) && "delimiter" in n;
 }
@@ -214,7 +214,7 @@ type PlacementCtx = {
   /** Ids fully declared and closed before this point, in document order. */
   declaredIds: Set<string>;
   /**
-   * §10.1/§D11: the richer document-order set a body-expression leaf `ref`/
+   * §10.1: the richer document-order set a body-expression leaf `ref`/
    * `wireSize` may name and have it PRECEDE the expression: full dotted +
    * bare-tail + local-ref-expanded ids of every container closed so far (mirror
    * of `documentDeclaredIds`, accumulated in document order via
@@ -232,7 +232,7 @@ type PlacementCtx = {
    * Every id a body/constraint expression `ref`/`wireSize` may name: authored
    * leaf/container ids, local-ref-expanded dotted ids, the bare tail segment of
    * each expanded id (for §6 nearest-preceding bare-id resolution), and repeat
-   * ids (§D11). Undefined ⇒ the existence check is skipped (e.g. inside defs).
+   * ids (§10.1). Undefined ⇒ the existence check is skipped (e.g. inside defs).
    */
   documentDeclaredIds?: Set<string>;
   /** Import `as` prefixes; a dotted ref whose head is one of these is deferred to the import layer (§1.2). */
@@ -265,7 +265,7 @@ function validateExprPlacement(
     if (e.kind === "prevIter" && slot !== "repeat.count" && slot !== "repeat.until")
       errors.push({ message: `${ctx}: prevIter may only appear in repeat.count or repeat.until, not ${slot}.` });
     if (pc === undefined) return;
-    // §D11: leaf `ref`/`wireSize` existence check. Applies to body and
+    // §10.1: leaf `ref`/`wireSize` existence check. Applies to body and
     // constraint expressions (pc present). A target naming nothing declared
     // anywhere in the document is a typo and a validation error.
     if (pc.documentDeclaredIds !== undefined &&
@@ -379,7 +379,7 @@ function validateType(type: Type, ctx: string, errors: ValidationError[], pc?: P
         errors.push({ message: `${ctx}: bits must have positive integer n, got ${type.n}.` });
       return;
     case "bytes":
-      // §3 (D3): bytes.n is either an Expr or the delimiter form.
+      // §3: bytes.n is either an Expr or the delimiter form.
       if (isBytesDelimitedShape(type.n)) {
         const delim = (type.n as { delimiter: unknown }).delimiter;
         // The delimiter form accepts only the `delimiter` key (mirrors schema
@@ -422,7 +422,7 @@ type WalkCtx = {
 };
 
 /**
- * §8/§11.1 (D9): validate `checksumParams` width and the polynomial/initValue/
+ * §8/§11.1: validate `checksumParams` width and the polynomial/initValue/
  * finalXOR numeric forms. A bare integer is allowed only when it is a safe
  * integer (≤ 2^53−1); a wider value MUST use the `^0x[0-9A-Fa-f]+$` hex string
  * so its full 64-bit precision survives. A non-int/bits checksum field (e.g. a
@@ -457,7 +457,7 @@ function validateChecksumParams(field: Field, ctx: string, errors: ValidationErr
   }
 }
 
-/** Decode a mask given as a non-negative integer or a 0x hex string to BigInt (§12, D4). */
+/** Decode a mask given as a non-negative integer or a 0x hex string to BigInt (§12). */
 function decodeMask(mask: unknown): bigint | undefined {
   if (typeof mask === "number") {
     if (!Number.isInteger(mask) || mask < 0) return undefined;
@@ -473,7 +473,7 @@ const SUBFIELD_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * §12/§11.1 (D4): validate `subfields`. Permitted only on `int` or a
+ * §12/§11.1: validate `subfields`. Permitted only on `int` or a
  * byte-aligned `bits` field (n a multiple of 8). Each `mask` must be a
  * non-negative integer or a 0x hex string and fit within the parent's declared
  * bit width (mask < 2^width), decoded at BigInt precision so masks above 53 bits
@@ -733,7 +733,7 @@ function validateEncrypted(e: Encrypted, ctx: string, w: WalkCtx): void {
     if (!isValidExpr(e.wireBits)) w.errors.push({ message: `${sub}: encrypted wireBits is malformed.` });
     else validateExprPlacement(e.wireBits, "wireBits", sub, w.errors, w.pc);
   }
-  // §5/§11.1 (D6): every `headerProtected` id must resolve to either (a) a
+  // §5/§11.1: every `headerProtected` id must resolve to either (a) a
   // direct leaf field of this encrypted container's plaintext, or (b) a field
   // declared earlier in the SAME body in document order (a plaintext-external
   // header field a header-protection scheme reorders/masks, e.g. QUIC's first
@@ -817,7 +817,7 @@ function validateContainerCtx(c: Container, ctx: string, w: WalkCtx): void {
   // §10.1: register this container's id as declared/closed in document order so
   // later siblings' wireSize/repeat-id references resolve, but not earlier ones.
   // declaredExprIds additionally captures the richer subtree set (dotted +
-  // bare-tail + local-ref-expanded ids) for the §D11 leaf-ref forward check, in
+  // bare-tail + local-ref-expanded ids) for the §10.1 leaf-ref forward check, in
   // the SAME document-order position. Both registrations happen post-dispatch,
   // so a container's own id is not yet present while its body expressions are
   // validated (self-size ref correctly flagged).
@@ -907,7 +907,7 @@ function collectRepeatIds(fields: Container[], out: Set<string>): void {
 }
 
 /**
- * §D11: collect every id a body/constraint `ref`/`wireSize` may legally name.
+ * §10.1: collect every id a body/constraint `ref`/`wireSize` may legally name.
  * This includes: each authored container/field id (bare), each local-ref-
  * expanded dotted id (`{ref.id}.{field.id}`, recursing through local defs with
  * a one-level cap for recursive defs), and — to honour §6 nearest-preceding
@@ -930,7 +930,7 @@ function collectDeclaredIds(
 }
 
 /**
- * §D11: emit every body/constraint-referenceable id contributed by a SINGLE
+ * §10.1: emit every body/constraint-referenceable id contributed by a SINGLE
  * container `c` and its subtree (full dotted id + bare tail segment, with local
  * `ref` targets expanded once). Used both up-front to build `documentDeclaredIds`
  * (via collectDeclaredIds) and incrementally — at each container's post-dispatch
@@ -1172,6 +1172,11 @@ export function validatePacket(packet: Packet): ValidationError[] {
   // Imports: unique `as` prefix, valid format.
   if (packet.imports) {
     const seen = new Set<string>();
+    // §1.2/§6: an import prefix and a local def name share one dotted
+    // namespace. If both exist, `addr.ipv4Addr` could mean the imported def
+    // `ipv4Addr` from prefix `addr`, or a dotted reach into the local def
+    // `addr` — nothing in the grammar disambiguates them.
+    const localDefNames = new Set(Object.keys(packet.defs ?? {}));
     for (const imp of packet.imports) {
       if (typeof imp.source !== "string" || imp.source.length === 0)
         errors.push({ message: `imports: entry is missing a source.` });
@@ -1179,7 +1184,11 @@ export function validatePacket(packet: Packet): ValidationError[] {
         errors.push({ message: `imports: 'as' prefix "${String(imp.as)}" must match [a-zA-Z][a-zA-Z0-9_]*.` });
       else if (seen.has(imp.as))
         errors.push({ message: `imports: duplicate 'as' prefix "${imp.as}".` });
-      else seen.add(imp.as);
+      else {
+        if (localDefNames.has(imp.as))
+          errors.push({ message: `imports: 'as' prefix "${imp.as}" collides with a local defs key of the same name; a dotted reference such as "${imp.as}.x" would be ambiguous (§1.2/§6).` });
+        seen.add(imp.as);
+      }
     }
   }
 
@@ -1194,7 +1203,7 @@ export function validatePacket(packet: Packet): ValidationError[] {
   // budget (`remaining`) and an injected bit budget (`enclosingBits`), §4.
   const repeatIds = new Set<string>();
   collectRepeatIds(packet.body ?? [], repeatIds);
-  // §D11: the set of ids a body/constraint ref/wireSize may name, and the
+  // §10.1: the set of ids a body/constraint ref/wireSize may name, and the
   // import `as` prefixes whose dotted refs are deferred to the import layer.
   const documentDeclaredIds = new Set<string>();
   collectDeclaredIds(packet.body ?? [], defs, "", documentDeclaredIds, new Set(), 0);
@@ -1238,7 +1247,7 @@ export function validatePacket(packet: Packet): ValidationError[] {
       if (!CONSTRAINT_KEYS.has(key))
         errors.push({ message: `constraints[${i}] has unknown key "${key}" (allowed: ${[...CONSTRAINT_KEYS].join(", ")}) (§9).` });
     }
-    // §D11: constraints are exempt from forward-order (§10.1), but ref/wireSize
+    // §10.1: constraints are exempt from forward-order (§10.1), but ref/wireSize
     // existence is still checked. Pass a pc that carries only the document id
     // set (the forward-order branches are skipped for slot==="constraint").
     const conPc: PlacementCtx = {

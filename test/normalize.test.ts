@@ -43,6 +43,44 @@ describe("normalize — ref expansion", () => {
       { id: "oct1", name: "O1", type: { kind: "int", bits: 8 } },
     ],
   };
+  it("resolves a decoder-injected varint width under the QUALIFIED id", () => {
+    // §10.7: the decoder injects the width keyed by the id the field actually
+    // renders under. Inside a `ref` that is `src.v`, not `v`. Looking it up
+    // with the bare id silently falls back to the static default (0 for
+    // varint), so the injection is ignored and the field vanishes from the
+    // layout — which is what every ref/repeat-nested varint used to do.
+    const withVarint: Struct = {
+      id: "withVarint",
+      fields: [{ id: "v", name: "V", type: { kind: "varint" } }],
+    };
+    const pkt: Packet = {
+      name: "t",
+      defs: { withVarint },
+      body: [{ kind: "ref", ref: "withVarint", id: "src", name: "Src" }],
+    };
+    const env = new Map([[varintBitsEnvKey("src.v"), 16]]);
+    const n = normalize(pkt, env);
+    expect(n.fields.map((f) => [f.id, f.bits])).toEqual([["src.v", 16]]);
+  });
+
+  it("resolves a decoder-injected berLength width under the QUALIFIED id", () => {
+    // Same shape, and berLength is the one that hides it best: its static
+    // default is 8, a plausible-looking short-form octet, so a missed
+    // injection reads as "the decoder said 1 byte" rather than as a bug.
+    const withBer: Struct = {
+      id: "withBer",
+      fields: [{ id: "len", name: "Len", type: { kind: "berLength" } }],
+    };
+    const pkt: Packet = {
+      name: "t",
+      defs: { withBer },
+      body: [{ kind: "ref", ref: "withBer", id: "outer", name: "Outer" }],
+    };
+    const env = new Map([[berLenEnvKey("outer.len"), 24]]);
+    const n = normalize(pkt, env);
+    expect(n.fields.map((f) => [f.id, f.bits])).toEqual([["outer.len", 24]]);
+  });
+
   it("prefixes expanded ids with the ref instantiation id", () => {
     const pkt: Packet = {
       name: "t",

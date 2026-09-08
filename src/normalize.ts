@@ -66,12 +66,13 @@ const MAX_REF_DEPTH = 64;
 
 /**
  * Static wire bit-width of a wire type. For decoder-determined widths
- * (`varint`, delimiter-terminated `bytes`), the width is looked up in `env`
- * under a key derived from `fieldId`. The CALLER must pass the same id used at
- * injection: for fields expanded inside a `ref`/`repeat` that is the qualified
- * id (`{ref.id}.{field.id}#N`), which the normalize walk threads through emit().
- * Calling this helper directly with a bare id for a qualified field yields 0
- * (unknown width) — resolve such fields via the full `normalize()` walk.
+ * (`varint`, `berLength`, delimiter-terminated `bytes`) the width is looked up
+ * in `env` under a key derived from `fieldId`, and the CALLER must pass the
+ * same id used at injection: for fields expanded inside a `ref`/`repeat` that
+ * is the qualified id (`{ref.id}.{field.id}#N`), which `emit()` builds and
+ * passes. Handing this helper a bare id for a qualified field silently returns
+ * the static default of §10.7 (0 for varint, 8 for berLength) rather than the
+ * injected width — resolve such fields through the full `normalize()` walk.
  */
 export function typeBits(type: Type, env: PacketEnv, fieldId?: string): number {
   switch (type.kind) {
@@ -81,10 +82,10 @@ export function typeBits(type: Type, env: PacketEnv, fieldId?: string): number {
     case "bits":
       return type.n;
     case "bytes":
-      // Delimiter-terminated bytes have a decoder-determined length
-      // injected under a qualified key; typeBits has only the bare id, so the
-      // qualified lookup happens in emit(). Without the qid the static layout is
-      // 0 bytes (unknown length, §3/§10.7, D3).
+      // Delimiter-terminated bytes have a decoder-determined length injected
+      // under the qualified key (§10.7). Without an injection the static
+      // default is 0 bytes — the length is unknown until the delimiter is
+      // found. emit() does the qualified lookup for the layout path.
       if (isBytesDelimited(type.n)) {
         if (fieldId !== undefined) {
           const v = env.get(bytesDelimLenEnvKey(fieldId));
@@ -94,9 +95,10 @@ export function typeBits(type: Type, env: PacketEnv, fieldId?: string): number {
       }
       return Math.max(0, Math.trunc(evalExprOr(type.n, env))) * 8;
     case "varint":
-      // §3/§10: the decoder injects the varint's wire bit-width under a key
+      // §10.7: the decoder injects the varint's wire bit-width under a key
       // distinct from the field's value slot (env[fieldId] holds the decoded
-      // value, not its width). With no injection the static layout yields 0.
+      // value, not its width). With no injection the static default is 0 bits —
+      // no minimum is meaningful without the value.
       if (fieldId !== undefined) {
         const v = env.get(varintBitsEnvKey(fieldId));
         if (v !== undefined) return v;
@@ -107,6 +109,9 @@ export function typeBits(type: Type, env: PacketEnv, fieldId?: string): number {
         const v = env.get(berLenEnvKey(fieldId));
         if (v !== undefined) return v;
       }
+      // §10.7: the BER short form is a single octet, so 8 bits is both the
+      // minimum and the common case. Deliberately unlike varint's 0 — see the
+      // static-default table in §10.7.
       return 8;
   }
 }
@@ -357,11 +362,14 @@ function emit(state: WalkState, field: Field, path: string): void {
   const prefix = state.idPrefix ? `${state.idPrefix}.` : "";
   const suffix = repeatSuffix(state);
   const id = `${prefix}${field.id}${suffix}`;
-  // §3/§10.7 (D3): a delimiter-terminated `bytes` length is injected under the
-  // qualified id; without injection the static layout is 0 bytes (unknown).
+  // §10.7: decoder-determined widths are injected under the QUALIFIED id, so
+  // that is what the lookup must use. The delimited-`bytes` branch already did;
+  // the general branch passed the bare `field.id`, so a `varint` / `berLength`
+  // inside a `ref` or `repeat` never matched its injection and silently fell
+  // back to the static default.
   const bits = (field.type.kind === "bytes" && isBytesDelimited(field.type.n))
     ? Math.max(0, Math.trunc(state.env.get(bytesDelimLenEnvKey(id)) ?? 0)) * 8
-    : typeBits(field.type, state.env, field.id);
+    : typeBits(field.type, state.env, id);
   const nf: NormalizedField = {
     id,
     name: field.name,

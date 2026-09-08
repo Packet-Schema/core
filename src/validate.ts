@@ -519,6 +519,49 @@ function validateSubfields(field: Field, ctx: string, errors: ValidationError[])
   });
 }
 
+/**
+ * §1.3/§11.1: the ids a `checksumCovers` entry may name.
+ *
+ * Two rules, and neither had any implementation — a covered id could name
+ * nothing at all and still validate, while §8 treats the list as the canonical
+ * ordering of the checksum's input stream.
+ *
+ *  1. An import-qualified def name (`addr.ipv4Addr`) is a validation error.
+ *     Imports expand under their INSTANTIATION id, so the name to use is `src`
+ *     or `src.oct0` — the import prefix never appears in a covered id.
+ *  2. Anything else must be an id the document actually declares.
+ *
+ * Both reuse the sets the expression checker already built for this walk, so
+ * there is no extra traversal. `documentDeclaredIds` deliberately includes
+ * container ids, `virtual` ids and expanded dotted ids, all of which §5 permits
+ * here; the check is only for names that resolve to nothing.
+ */
+function validateChecksumCovers(field: Field, ctx: string, w: WalkCtx): void {
+  const covers = field.checksumCovers;
+  if (!Array.isArray(covers)) {
+    w.errors.push({ message: `${ctx}: checksumCovers must be an array of field ids (§8).` });
+    return;
+  }
+  // No placement context (inside `defs`, where the document-wide id set is not
+  // known): the existence check is skipped exactly as it is for expressions.
+  const known = w.pc?.documentDeclaredIds;
+  const prefixes = w.pc?.importPrefixes;
+  for (const id of covers) {
+    if (typeof id !== "string" || id.length === 0) {
+      w.errors.push({ message: `${ctx}: checksumCovers entries must be non-empty field ids (§8).` });
+      continue;
+    }
+    const head = id.includes(".") ? id.slice(0, id.indexOf(".")) : "";
+    if (head !== "" && prefixes !== undefined && prefixes.has(head)) {
+      w.errors.push({ message: `${ctx}: checksumCovers "${id}" is an import-qualified def name; use the instantiation id or its dotted leaf form (§1.3/§11.1).` });
+      continue;
+    }
+    if (known !== undefined && !known.has(id)) {
+      w.errors.push({ message: `${ctx}: checksumCovers "${id}" is not declared anywhere in the packet (§8/§11.1).` });
+    }
+  }
+}
+
 function validateField(field: Field, ctx: string, w: WalkCtx): void {
   if (typeof field.id !== "string" || !ID_RE.test(field.id))
     w.errors.push({ message: `${ctx}: field id "${String(field.id)}" must match ${ID_RE}.` });
@@ -544,6 +587,8 @@ function validateField(field: Field, ctx: string, w: WalkCtx): void {
     w.errors.push({ message: `${ctx}/${field.id}: checksumParams cannot be used with the non-CRC algorithm "${field.checksumAlgorithm}" (§8/§11.1).` });
   if (field.checksumParams !== undefined)
     validateChecksumParams(field, `${ctx}/${field.id}`, w.errors);
+  if (field.checksumCovers !== undefined)
+    validateChecksumCovers(field, `${ctx}/${field.id}`, w);
   if (field.subfields !== undefined)
     validateSubfields(field, `${ctx}/${field.id}`, w.errors);
   if (field.byteOrder !== undefined && field.byteOrder !== "BE" && field.byteOrder !== "LE")

@@ -2714,6 +2714,35 @@ a truncated capture (§11.2). The `delimiter` byte-sequence terminator is
 unrelated to the `repeat.count.until` after-iteration predicate (§5); the two
 share no keyword.
 
+**Decoder-injected field widths.** Three wire types have no static width and
+take the same injection contract as the iteration count above: the decoder
+supplies the width during the seed phase, keyed by the field's
+**fully-qualified id** (the ref-prefix path plus the field id plus any
+repeat-index suffix — §6), never the bare id.
+
+| Type | Env key | Injected value |
+|---|---|---|
+| `varint` | `__varintBits__{qualified-id}` | the encoded value's wire width, in **bits** |
+| `berLength` | `__berLen__{qualified-id}` | the length octets' wire width, in **bits** |
+| `bytes` with a delimiter-terminated `n` | `__bytesDelimLen__{qualified-id}` | the payload length, in **bytes** |
+
+The value slot and the width slot are distinct: `env[fieldId]` holds a decoded
+*value*, and these keys hold a *width*. A `varint` therefore occupies two
+independent entries.
+
+When the key is absent — static preview with no decoder pass — the normalize
+phase falls back to a fixed width:
+
+| Type | Static default | Rationale |
+|---|---|---|
+| `varint` | `0` bits | No minimum is meaningful without the value; the field contributes nothing to a static layout. |
+| `berLength` | `8` bits | The BER short form is a single octet, so one byte is both the minimum and the overwhelmingly common case; rendering it is more useful than rendering nothing. |
+| `bytes` (delimited) | `0` bytes | The length is unknown until the delimiter is found. |
+
+The asymmetry between `varint` and `berLength` is deliberate and is stated here
+so that a reader does not have to infer it from an implementation. Renderers
+**MUST NOT** treat a defaulted width as a decoded one.
+
 ### 10.8 Nested optional evaluation
 
 When an `optional` is nested inside another `optional`:

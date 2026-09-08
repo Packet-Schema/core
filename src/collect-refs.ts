@@ -3,13 +3,21 @@ import { isField } from "./utils.js";
 import type { Container, Expr, Packet } from "./types.js";
 
 function isExpr(value: unknown): value is Expr {
-  return typeof value === "object" && value !== null && "kind" in value &&
-    typeof (value as Record<string, unknown>).kind === "string";
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "kind" in value &&
+    typeof (value as Record<string, unknown>).kind === "string"
+  );
 }
 
 function isUntilCount(value: unknown): value is { until: Expr } {
-  return typeof value === "object" && value !== null && "until" in value &&
-    isExpr((value as Record<string, unknown>).until);
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "until" in value &&
+    isExpr((value as Record<string, unknown>).until)
+  );
 }
 
 /** All plain field-id references reachable from a packet's expressions. */
@@ -29,9 +37,16 @@ export function collectPsdlRefs(packet: Packet): Set<string> {
         continue;
       }
       switch (c.kind) {
-        case "virtual": visit(c.expr); break;
-        case "group": walk(c.children); break;
-        case "bounded": visit(c.bytes); walk(c.fields); break;
+        case "virtual":
+          visit(c.expr);
+          break;
+        case "group":
+          walk(c.children);
+          break;
+        case "bounded":
+          visit(c.bytes);
+          walk(c.fields);
+          break;
         case "switch":
           visit(c.on);
           for (const arm of Object.values(c.cases)) walk(arm.fields);
@@ -54,7 +69,11 @@ export function collectPsdlRefs(packet: Packet): Set<string> {
     }
   };
   walk(packet.body);
-  if (packet.defs) for (const def of Object.values(packet.defs)) walk(def.fields);
-  for (const con of packet.constraints ?? []) { visit(con.lhs); visit(con.rhs); }
+  if (packet.defs)
+    for (const def of Object.values(packet.defs)) walk(def.fields);
+  for (const con of packet.constraints ?? []) {
+    visit(con.lhs);
+    visit(con.rhs);
+  }
   return out;
 }

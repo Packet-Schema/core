@@ -10,7 +10,11 @@ export type PropagateOk = { ok: PacketEnv };
  * reproduces the conflict with full per-constraint diagnostics. Both fields
  * are additive (older callers that only read `conflict` keep working).
  */
-export type PropagateConflict = { conflict: string; index?: number; env?: PacketEnv };
+export type PropagateConflict = {
+  conflict: string;
+  index?: number;
+  env?: PacketEnv;
+};
 export type PropagateResult = PropagateOk | PropagateConflict;
 
 function solveFor(
@@ -59,13 +63,20 @@ function evalConst(expr: Expr, env: PacketEnv): number | null {
 // before adoption.
 function invertLeft(o: string, result: number, known: number): number | null {
   switch (o) {
-    case "+": return result - known;
-    case "-": return result + known;
-    case "*": return known === 0 ? null : Math.trunc(result / known);
-    case "/": return result * known;
-    case "%": return null;
-    case "<<": return result >>> known;        // inverse of (a << known)>>>0
-    case ">>": return (result << known) | 0;    // inverse of arithmetic a >> known
+    case "+":
+      return result - known;
+    case "-":
+      return result + known;
+    case "*":
+      return known === 0 ? null : Math.trunc(result / known);
+    case "/":
+      return result * known;
+    case "%":
+      return null;
+    case "<<":
+      return result >>> known; // inverse of (a << known)>>>0
+    case ">>":
+      return (result << known) | 0; // inverse of arithmetic a >> known
   }
   return null;
 }
@@ -73,14 +84,21 @@ function invertLeft(o: string, result: number, known: number): number | null {
 // Invert `known OP b = result` for `b` (the unknown on the RIGHT operand).
 function invertRight(o: string, result: number, known: number): number | null {
   switch (o) {
-    case "+": return result - known;
-    case "-": return known - result;
-    case "*": return known === 0 ? null : Math.trunc(result / known);
-    case "/": return result === 0 ? null : Math.trunc(known / result);
-    case "%": return null;
+    case "+":
+      return result - known;
+    case "-":
+      return known - result;
+    case "*":
+      return known === 0 ? null : Math.trunc(result / known);
+    case "/":
+      return result === 0 ? null : Math.trunc(known / result);
+    case "%":
+      return null;
     // Shift amount as the unknown is not soundly invertible.
-    case "<<": return null;
-    case ">>": return null;
+    case "<<":
+      return null;
+    case ">>":
+      return null;
   }
   return null;
 }
@@ -112,10 +130,16 @@ function applyKnownSide(
     } catch (e) {
       // Mirror validateConstraints: a `must` expression that cannot be
       // evaluated is a hard conflict, never an uncaught exception.
-      return { conflict: withDoc(`Constraint evaluation error: ${e instanceof Error ? e.message : String(e)}`, c) };
+      return {
+        conflict: withDoc(
+          `Constraint evaluation error: ${e instanceof Error ? e.message : String(e)}`,
+          c,
+        ),
+      };
     }
     if (otherVal !== null && otherVal !== known) {
-      const [l, r] = knownSide === "lhs" ? [known, otherVal] : [otherVal, known];
+      const [l, r] =
+        knownSide === "lhs" ? [known, otherVal] : [otherVal, known];
       return { conflict: withDoc(`Constraint failed: lhs=${l} rhs=${r}`, c) };
     }
     return null;
@@ -168,8 +192,14 @@ export function propagate(
     // A constraint with no ref node at all (literal-only, or built solely from
     // env-backed nullaries like `remaining`) can never match the changed-key
     // gate, yet may still be violated — always evaluate it as a pure check.
-    const refLess = uniqueRefs(c.lhs).length === 0 && uniqueRefs(c.rhs).length === 0;
-    if (!refLess && !containsRef(c.lhs, changedKey) && !containsRef(c.rhs, changedKey)) continue;
+    const refLess =
+      uniqueRefs(c.lhs).length === 0 && uniqueRefs(c.rhs).length === 0;
+    if (
+      !refLess &&
+      !containsRef(c.lhs, changedKey) &&
+      !containsRef(c.rhs, changedKey)
+    )
+      continue;
     let lhsVal: number | null;
     let rhsVal: number | null;
     try {
@@ -179,10 +209,25 @@ export function propagate(
       // Mirror validateConstraints: an evaluation error (e.g. division by zero
       // on wire-derived values) in a `must` constraint is a hard conflict, not
       // an uncaught exception out of the solver.
-      return { conflict: withDoc(`Constraint evaluation error: ${e instanceof Error ? e.message : String(e)}`, c), index, env: next };
+      return {
+        conflict: withDoc(
+          `Constraint evaluation error: ${e instanceof Error ? e.message : String(e)}`,
+          c,
+        ),
+        index,
+        env: next,
+      };
     }
     if (lhsVal !== null && rhsVal !== null) {
-      if (lhsVal !== rhsVal) return { conflict: withDoc(`Constraint failed: lhs=${lhsVal} rhs=${rhsVal}`, c), index, env: next };
+      if (lhsVal !== rhsVal)
+        return {
+          conflict: withDoc(
+            `Constraint failed: lhs=${lhsVal} rhs=${rhsVal}`,
+            c,
+          ),
+          index,
+          env: next,
+        };
       continue;
     }
     if (lhsVal !== null) {
@@ -237,7 +282,11 @@ export function propagateFixpoint(
       if ("conflict" in res) return res;
       // Adopt newly resolved keys.
       for (const [k, v] of res.ok) {
-        if (current.get(k) !== v) { current = res.ok; changed = true; break; }
+        if (current.get(k) !== v) {
+          current = res.ok;
+          changed = true;
+          break;
+        }
       }
     }
   }
@@ -283,15 +332,22 @@ function withDoc(message: string, c: Constraint): string {
 export function validateConstraints(
   constraints: Constraint[],
   env: PacketEnv,
-): { ok: true; diagnostics?: ConstraintDiagnostic[] }
+):
+  | { ok: true; diagnostics?: ConstraintDiagnostic[] }
   | { conflict: string; diagnostics: ConstraintDiagnostic[] } {
   const diagnostics: ConstraintDiagnostic[] = [];
   let hardConflict: string | null = null;
   for (const [index, c] of constraints.entries()) {
     const level = c.level ?? "must";
     const report = (message: string): void => {
-      if (level === "must" && hardConflict === null) hardConflict = withDoc(message, c);
-      diagnostics.push({ index, level, message, ...(c.doc !== undefined ? { doc: c.doc } : {}) });
+      if (level === "must" && hardConflict === null)
+        hardConflict = withDoc(message, c);
+      diagnostics.push({
+        index,
+        level,
+        message,
+        ...(c.doc !== undefined ? { doc: c.doc } : {}),
+      });
     };
     let l: number | null;
     let r: number | null;
@@ -299,7 +355,9 @@ export function validateConstraints(
       l = evalConst(c.lhs, env);
       r = evalConst(c.rhs, env);
     } catch (e) {
-      report(`Constraint evaluation error: ${e instanceof Error ? e.message : String(e)}`);
+      report(
+        `Constraint evaluation error: ${e instanceof Error ? e.message : String(e)}`,
+      );
       continue;
     }
     if (l === null || r === null) continue;

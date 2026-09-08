@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { propagate, propagateFixpoint, validateConstraints } from "../src/constraint.js";
+import {
+  propagate,
+  propagateFixpoint,
+  validateConstraints,
+} from "../src/constraint.js";
 import { lit, op, ref, remainingEnvKey } from "../src/expr.js";
 import type { Constraint, Expr, PacketEnv } from "../src/types.js";
 
-const env = (e: Record<string, number>): PacketEnv => new Map(Object.entries(e));
+const env = (e: Record<string, number>): PacketEnv =>
+  new Map(Object.entries(e));
 
 describe("propagate — single constraint", () => {
   it("solves a single-unknown linear constraint", () => {
@@ -75,14 +80,17 @@ describe("propagate — inversion paths", () => {
     // x >> 1 = 0x20000000 (arithmetic shift, §4). The inverse candidate
     // 0x20000000 << 1 = 0x40000000 is non-negative, so 0x40000000 >> 1 =
     // 0x20000000 round-trips and the solution is adopted.
-    const c: Constraint = { lhs: op(">>", ref("x"), lit(1)), rhs: lit(0x20000000) };
+    const c: Constraint = {
+      lhs: op(">>", ref("x"), lit(1)),
+      rhs: lit(0x20000000),
+    };
     const res = propagate([c], env({}), "x");
     expect("ok" in res).toBe(true);
     if ("ok" in res) {
       const solved = res.ok.get("x");
       expect(solved).toBeDefined();
       // The adopted value, re-evaluated under arithmetic >>, reproduces the rhs.
-      expect((solved! >> 1)).toBe(0x20000000);
+      expect(solved! >> 1).toBe(0x20000000);
       expect(validateConstraints([c], res.ok)).toEqual({ ok: true });
     }
   });
@@ -91,7 +99,10 @@ describe("propagate — inversion paths", () => {
     // x >> 1 = 0x40000000. The inverse candidate 0x40000000 << 1 = 0x80000000
     // is negative as a signed 32-bit int, so -2^31 >> 1 = -2^30 ≠ 0x40000000:
     // the candidate fails the round-trip check and is NOT adopted.
-    const c: Constraint = { lhs: op(">>", ref("x"), lit(1)), rhs: lit(0x40000000) };
+    const c: Constraint = {
+      lhs: op(">>", ref("x"), lit(1)),
+      rhs: lit(0x40000000),
+    };
     const res = propagate([c], env({}), "x");
     expect("ok" in res).toBe(true);
     if ("ok" in res) expect(res.ok.has("x")).toBe(false);
@@ -125,7 +136,11 @@ describe("propagate — changedKey gating & multi-unknown bail-out (coverage #16
   it("skips a constraint that references neither side of the changedKey", () => {
     // changedKey 'c' is unrelated to a/b, so the constraint is skipped and
     // neither a nor b is touched.
-    const res = propagate([{ lhs: ref("a"), rhs: ref("b") }], env({ c: 5 }), "c");
+    const res = propagate(
+      [{ lhs: ref("a"), rhs: ref("b") }],
+      env({ c: 5 }),
+      "c",
+    );
     expect("ok" in res).toBe(true);
     if ("ok" in res) {
       expect(res.ok.has("a")).toBe(false);
@@ -137,7 +152,10 @@ describe("propagate — changedKey gating & multi-unknown bail-out (coverage #16
   it("does not resolve a side with two unknowns", () => {
     // total = a + b with only `total` known: the rhs has two unknowns (a, b),
     // so applyKnownSide bails out and resolves neither.
-    const c: Constraint = { lhs: ref("total"), rhs: op("+", ref("a"), ref("b")) };
+    const c: Constraint = {
+      lhs: ref("total"),
+      rhs: op("+", ref("a"), ref("b")),
+    };
     const res = propagate([c], env({ total: 10 }), "total");
     expect("ok" in res).toBe(true);
     if ("ok" in res) {
@@ -149,18 +167,35 @@ describe("propagate — changedKey gating & multi-unknown bail-out (coverage #16
 
 describe("validateConstraints", () => {
   it("passes when both sides agree, skips unknowns", () => {
-    expect(validateConstraints([{ lhs: ref("a"), rhs: ref("b") }], env({ a: 3, b: 3 }))).toEqual({ ok: true });
-    expect(validateConstraints([{ lhs: ref("a"), rhs: ref("missing") }], env({ a: 3 }))).toEqual({ ok: true });
+    expect(
+      validateConstraints(
+        [{ lhs: ref("a"), rhs: ref("b") }],
+        env({ a: 3, b: 3 }),
+      ),
+    ).toEqual({ ok: true });
+    expect(
+      validateConstraints(
+        [{ lhs: ref("a"), rhs: ref("missing") }],
+        env({ a: 3 }),
+      ),
+    ).toEqual({ ok: true });
   });
   it("flags a mismatch", () => {
-    const r = validateConstraints([{ lhs: ref("a"), rhs: ref("b") }], env({ a: 3, b: 4 }));
+    const r = validateConstraints(
+      [{ lhs: ref("a"), rhs: ref("b") }],
+      env({ a: 3, b: 4 }),
+    );
     expect("conflict" in r).toBe(true);
   });
 });
 
 describe("constraint level — solver participation (§9.1)", () => {
   it("must / level-less constraints back-propagate", () => {
-    const c: Constraint = { lhs: ref("total"), rhs: op("+", ref("a"), ref("b")), level: "must" };
+    const c: Constraint = {
+      lhs: ref("total"),
+      rhs: op("+", ref("a"), ref("b")),
+      level: "must",
+    };
     const res = propagate([c], env({ total: 10, a: 4 }), "total");
     expect("ok" in res).toBe(true);
     if (!("ok" in res)) return;
@@ -168,7 +203,11 @@ describe("constraint level — solver participation (§9.1)", () => {
   });
 
   it("should constraints do NOT back-propagate (no value derived)", () => {
-    const c: Constraint = { lhs: ref("total"), rhs: op("+", ref("a"), ref("b")), level: "should" };
+    const c: Constraint = {
+      lhs: ref("total"),
+      rhs: op("+", ref("a"), ref("b")),
+      level: "should",
+    };
     const res = propagate([c], env({ total: 10, a: 4 }), "total");
     expect("ok" in res).toBe(true);
     if (!("ok" in res)) return;
@@ -213,7 +252,11 @@ describe("constraint level — solver participation (§9.1)", () => {
 
   it("fixpoint ignores should/may when resolving chains", () => {
     const must: Constraint = { lhs: ref("x"), rhs: op("+", ref("y"), lit(1)) };
-    const should: Constraint = { lhs: ref("z"), rhs: op("+", ref("x"), lit(1)), level: "should" };
+    const should: Constraint = {
+      lhs: ref("z"),
+      rhs: op("+", ref("x"), lit(1)),
+      level: "should",
+    };
     const res = propagateFixpoint([must, should], env({ y: 5 }));
     expect("ok" in res).toBe(true);
     if (!("ok" in res)) return;
@@ -227,7 +270,10 @@ describe("propagateFixpoint — constraint-ref seeding (§9)", () => {
     // version == 4 with an unrelated env: the pass set is seeded from the
     // constraint's refs, so the constraint fires even though no env key
     // appears in it.
-    const res = propagateFixpoint([{ lhs: ref("version"), rhs: lit(4) }], env({ other: 1 }));
+    const res = propagateFixpoint(
+      [{ lhs: ref("version"), rhs: lit(4) }],
+      env({ other: 1 }),
+    );
     expect("ok" in res).toBe(true);
     if (!("ok" in res)) return;
     expect(res.ok.get("version")).toBe(4);
@@ -248,7 +294,10 @@ describe("propagateFixpoint — constraint-ref seeding (§9)", () => {
   });
 
   it("does NOT seed from should/may constraints (§9.1 solver exclusion)", () => {
-    const res = propagateFixpoint([{ lhs: ref("v"), rhs: lit(7), level: "should" }], env({}));
+    const res = propagateFixpoint(
+      [{ lhs: ref("v"), rhs: lit(7), level: "should" }],
+      env({}),
+    );
     expect("ok" in res).toBe(true);
     if (!("ok" in res)) return;
     expect(res.ok.has("v")).toBe(false);
@@ -257,7 +306,11 @@ describe("propagateFixpoint — constraint-ref seeding (§9)", () => {
 
 describe("validateConstraints — evaluation errors become diagnostics (§9.1)", () => {
   it("a should-level division by zero is a diagnostic, not a thrown error", () => {
-    const c: Constraint = { lhs: op("/", ref("a"), ref("b")), rhs: lit(1), level: "should" };
+    const c: Constraint = {
+      lhs: op("/", ref("a"), ref("b")),
+      rhs: lit(1),
+      level: "should",
+    };
     const v = validateConstraints([c], env({ a: 4, b: 0 }));
     expect("conflict" in v).toBe(false);
     if (!("ok" in v)) return;
@@ -267,7 +320,11 @@ describe("validateConstraints — evaluation errors become diagnostics (§9.1)",
   });
 
   it("a may-level modulo by zero is informational only", () => {
-    const c: Constraint = { lhs: op("%", ref("x"), ref("y")), rhs: lit(0), level: "may" };
+    const c: Constraint = {
+      lhs: op("%", ref("x"), ref("y")),
+      rhs: lit(0),
+      level: "may",
+    };
     const v = validateConstraints([c], env({ x: 8, y: 0 }));
     expect("conflict" in v).toBe(false);
     if (!("ok" in v)) return;
@@ -295,8 +352,18 @@ describe("validateConstraints — composite diagnostics shape (§9.1)", () => {
     expect("conflict" in v).toBe(false);
     if (!("ok" in v)) return;
     expect(v.diagnostics).toHaveLength(2);
-    expect(v.diagnostics![0]).toEqual({ index: 0, level: "may", message: "Constraint failed: lhs=0 rhs=1", doc: "advisory A" });
-    expect(v.diagnostics![1]).toEqual({ index: 2, level: "should", message: "Constraint failed: lhs=0 rhs=1", doc: "advisory B" });
+    expect(v.diagnostics![0]).toEqual({
+      index: 0,
+      level: "may",
+      message: "Constraint failed: lhs=0 rhs=1",
+      doc: "advisory A",
+    });
+    expect(v.diagnostics![1]).toEqual({
+      index: 2,
+      level: "should",
+      message: "Constraint failed: lhs=0 rhs=1",
+      doc: "advisory B",
+    });
   });
 
   it("returns the must conflict AND keeps should/may diagnostics (must is indexed too)", () => {
@@ -312,8 +379,17 @@ describe("validateConstraints — composite diagnostics shape (§9.1)", () => {
     expect(v.conflict).toBe("Constraint failed: lhs=0 rhs=4 (TCP rule §3.1)");
     // §9.1: every failing constraint — must included — is an indexed diagnostic.
     expect(v.diagnostics).toHaveLength(3);
-    expect(v.diagnostics!.map((d) => [d.index, d.level])).toEqual([[0, "should"], [1, "must"], [2, "may"]]);
-    expect(v.diagnostics![1]).toEqual({ index: 1, level: "must", message: "Constraint failed: lhs=0 rhs=4", doc: "TCP rule §3.1" });
+    expect(v.diagnostics!.map((d) => [d.index, d.level])).toEqual([
+      [0, "should"],
+      [1, "must"],
+      [2, "may"],
+    ]);
+    expect(v.diagnostics![1]).toEqual({
+      index: 1,
+      level: "must",
+      message: "Constraint failed: lhs=0 rhs=4",
+      doc: "TCP rule §3.1",
+    });
   });
 
   it("reports EVERY failing must as a diagnostic; conflict is the first in declaration order", () => {
@@ -329,7 +405,12 @@ describe("validateConstraints — composite diagnostics shape (§9.1)", () => {
     // …but the second must violation is not silenced: both are indexed.
     expect(v.diagnostics).toEqual([
       { index: 0, level: "must", message: "Constraint failed: lhs=0 rhs=1" },
-      { index: 1, level: "must", message: "Constraint failed: lhs=0 rhs=2", doc: "second rule" },
+      {
+        index: 1,
+        level: "must",
+        message: "Constraint failed: lhs=0 rhs=2",
+        doc: "second rule",
+      },
     ]);
   });
 });
@@ -346,7 +427,11 @@ describe("propagate / propagateFixpoint — solver robustness (§9.1)", () => {
   });
 
   it("should/may evaluation errors are still skipped before evaluation (no crash, no conflict)", () => {
-    const c: Constraint = { lhs: op("/", ref("a"), ref("b")), rhs: lit(1), level: "should" };
+    const c: Constraint = {
+      lhs: op("/", ref("a"), ref("b")),
+      rhs: lit(1),
+      level: "should",
+    };
     const p = propagateFixpoint([c], env({ a: 4, b: 0 }));
     expect("ok" in p).toBe(true);
   });
@@ -372,18 +457,30 @@ describe("propagate / propagateFixpoint — solver robustness (§9.1)", () => {
     );
     expect("conflict" in bad).toBe(true);
     if (!("conflict" in bad)) return;
-    expect(bad.conflict).toBe("Constraint failed: lhs=7 rhs=0 (no trailing garbage)");
-    const good = propagateFixpoint([{ lhs: rem, rhs: lit(0) }], new Map([[remainingEnvKey(), 0]]));
+    expect(bad.conflict).toBe(
+      "Constraint failed: lhs=7 rhs=0 (no trailing garbage)",
+    );
+    const good = propagateFixpoint(
+      [{ lhs: rem, rhs: lit(0) }],
+      new Map([[remainingEnvKey(), 0]]),
+    );
     expect("ok" in good).toBe(true);
   });
 
   it("ref-less should/may constraints stay diagnostic-only in the solver", () => {
-    const r = propagateFixpoint([{ lhs: lit(4), rhs: lit(5), level: "should" }], env({}));
+    const r = propagateFixpoint(
+      [{ lhs: lit(4), rhs: lit(5), level: "should" }],
+      env({}),
+    );
     expect("ok" in r).toBe(true);
   });
 
   it("propagate conflict messages carry the authored doc (withDoc parity with validateConstraints)", () => {
-    const c: Constraint = { lhs: ref("total"), rhs: op("+", ref("a"), ref("b")), doc: "total = a + b" };
+    const c: Constraint = {
+      lhs: ref("total"),
+      rhs: op("+", ref("a"), ref("b")),
+      doc: "total = a + b",
+    };
     const p = propagate([c], env({ total: 10, a: 4, b: 9 }), "total");
     expect("conflict" in p).toBe(true);
     if (!("conflict" in p)) return;
@@ -395,7 +492,10 @@ describe("propagate / propagateFixpoint — solver robustness (§9.1)", () => {
     // (rhsVal = null), then solveFor evaluates the constant subtree 1/0 in
     // isolation. That evaluation error means "no candidate", never an
     // uncaught exception out of the solver (§9.1).
-    const c: Constraint = { lhs: lit(5), rhs: op("+", ref("x"), op("/", lit(1), lit(0))) };
+    const c: Constraint = {
+      lhs: lit(5),
+      rhs: op("+", ref("x"), op("/", lit(1), lit(0))),
+    };
     expect(() => propagate([c], env({}), "x")).not.toThrow();
     expect(() => propagateFixpoint([c], env({}))).not.toThrow();
     const p = propagate([c], env({}), "x");
@@ -443,7 +543,9 @@ describe("propagate / propagateFixpoint — conflict localization (§9.1)", () =
     const v = validateConstraints(cs, f.env!);
     expect("conflict" in v).toBe(true);
     if (!("conflict" in v)) return;
-    expect(v.diagnostics.some((d) => d.index === 1 && d.level === "must")).toBe(true);
+    expect(v.diagnostics.some((d) => d.index === 1 && d.level === "must")).toBe(
+      true,
+    );
   });
 
   it("a must evaluation-error conflict is indexed too", () => {
@@ -457,7 +559,10 @@ describe("propagate / propagateFixpoint — conflict localization (§9.1)", () =
 
 describe("validateConstraints — conflict returns always carry diagnostics", () => {
   it("a lone must mismatch yields conflict WITH its indexed diagnostic", () => {
-    const v = validateConstraints([{ lhs: ref("a"), rhs: lit(1) }], env({ a: 0 }));
+    const v = validateConstraints(
+      [{ lhs: ref("a"), rhs: lit(1) }],
+      env({ a: 0 }),
+    );
     expect("conflict" in v).toBe(true);
     if (!("conflict" in v)) return;
     // The conflict branch's diagnostics is non-optional: report() always

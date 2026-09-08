@@ -36,7 +36,10 @@ describe("resolveValueEntry (§5.3)", () => {
   });
 
   it("handles negative values on signed fields", () => {
-    const signed: ValueEntry[] = [{ value: -1, name: "SENTINEL" }, { range: [-8, -2], name: "NEG" }];
+    const signed: ValueEntry[] = [
+      { value: -1, name: "SENTINEL" },
+      { range: [-8, -2], name: "NEG" },
+    ];
     expect(resolveValueEntry(signed, -1)?.name).toBe("SENTINEL");
     expect(resolveValueEntry(signed, -5)?.name).toBe("NEG");
     expect(resolveValueEntry(signed, 0)).toBeUndefined();
@@ -48,10 +51,10 @@ describe("resolveValueEntry (§5.3)", () => {
       { value: 46, name: "EF", level: "must" },
       { pattern: "xxxx11", name: "EXP", level: "may" },
     ];
-    expect(resolveValueEntry(dscp, 46)?.name).toBe("EF");      // exact wins
+    expect(resolveValueEntry(dscp, 46)?.name).toBe("EF"); // exact wins
     expect(resolveValueEntry(dscp, 0b000111)?.name).toBe("EXP"); // 7 ends in 11
     expect(resolveValueEntry(dscp, 0b101011)?.name).toBe("EXP"); // 43 ends in 11
-    expect(resolveValueEntry(dscp, 0b001000)).toBeUndefined();   // 8 — not exp, no name
+    expect(resolveValueEntry(dscp, 0b001000)).toBeUndefined(); // 8 — not exp, no name
   });
 
   it("treats trailing pattern length as don't-care ('11' ≡ 'xxxx11')", () => {
@@ -72,16 +75,16 @@ describe("resolveValueEntry (§5.3)", () => {
     // bits of 2^40 are 0) and would wrongly read bit 40 as 0.
     const v = 2 ** 40;
     // Pattern of length L: leftmost char is bit L-1.
-    expect(matchesPattern("1" + "x".repeat(40), v)).toBe(true);   // bit40 == 1 ✓
-    expect(matchesPattern("0" + "x".repeat(40), v)).toBe(false);  // bit40 == 0? no
-    expect(matchesPattern("0" + "x".repeat(41), v)).toBe(true);   // bit41 == 0 ✓
-    expect(matchesPattern("xxxx0", v)).toBe(true);                // bit0 == 0 ✓
-    expect(matchesPattern("xxxx1", v)).toBe(false);               // bit0 == 1? no
+    expect(matchesPattern("1" + "x".repeat(40), v)).toBe(true); // bit40 == 1 ✓
+    expect(matchesPattern("0" + "x".repeat(40), v)).toBe(false); // bit40 == 0? no
+    expect(matchesPattern("0" + "x".repeat(41), v)).toBe(true); // bit41 == 0 ✓
+    expect(matchesPattern("xxxx0", v)).toBe(true); // bit0 == 0 ✓
+    expect(matchesPattern("xxxx1", v)).toBe(false); // bit0 == 1? no
   });
 
   it("tests negative (signed) values in two's complement", () => {
-    expect(matchesPattern("1111", -1)).toBe(true);   // -1 = …1111
-    expect(matchesPattern("1011", -5)).toBe(true);   // -5 = …11011, low4 = 1011
+    expect(matchesPattern("1111", -1)).toBe(true); // -1 = …1111
+    expect(matchesPattern("1011", -5)).toBe(true); // -5 = …11011, low4 = 1011
     expect(matchesPattern("1111", -5)).toBe(false);
   });
 
@@ -129,7 +132,9 @@ describe("resolveValueEntry (§5.3)", () => {
     // A value outside the range still falls through to the pattern…
     expect(resolveValueEntry(v, 0b1000011)?.name).toBe("EXP");
     // …and exact `value` still beats both fallback forms regardless of order.
-    expect(resolveValueEntry([...v, { value: 7, name: "SEVEN" }], 7)?.name).toBe("SEVEN");
+    expect(
+      resolveValueEntry([...v, { value: 7, name: "SEVEN" }], 7)?.name,
+    ).toBe("SEVEN");
   });
 
   it("overlapping ranges resolve first-wins in array order (open dictionary, §5.3)", () => {
@@ -137,7 +142,7 @@ describe("resolveValueEntry (§5.3)", () => {
       { range: [0, 15], name: "LOW" },
       { range: [8, 63], name: "HIGH" },
     ];
-    expect(resolveValueEntry(v, 10)?.name).toBe("LOW");  // both contain 10 → first wins
+    expect(resolveValueEntry(v, 10)?.name).toBe("LOW"); // both contain 10 → first wins
     expect(resolveValueEntry(v, 20)?.name).toBe("HIGH");
   });
 
@@ -158,7 +163,9 @@ describe("resolveValueEntry (§5.3)", () => {
     expect(matchesPattern("X1", 3)).toBe(true);
     expect(matchesPattern("X1", 2)).toBe(false);
     // 0b0111 ends in 11; the XX bits are don't-care.
-    expect(resolveValueEntry([{ pattern: "XX11", name: "EXP" }], 0b0111)?.name).toBe("EXP");
+    expect(
+      resolveValueEntry([{ pattern: "XX11", name: "EXP" }], 0b0111)?.name,
+    ).toBe("EXP");
     // Mixed case behaves identically to the all-lowercase pattern (bit 1 must be 1).
     expect(matchesPattern("Xx1X", 0b0110)).toBe(true);
     expect(matchesPattern("xx1x", 0b0110)).toBe(true);
@@ -171,7 +178,11 @@ describe("resolveValueEntry (§5.3)", () => {
     expect(matchesPattern("xxxx11", Infinity)).toBe(false);
     expect(matchesPattern("xxxx11", -Infinity)).toBe(false);
     expect(matchesPattern("1", 1.5)).toBe(false);
-    const v: ValueEntry[] = [{ value: 1, name: "A" }, { pattern: "xxxx11", name: "EXP" }, { range: [0, 9], name: "R" }];
+    const v: ValueEntry[] = [
+      { value: 1, name: "A" },
+      { pattern: "xxxx11", name: "EXP" },
+      { range: [0, 9], name: "R" },
+    ];
     // All three matcher forms agree: a non-integer resolves to undefined, no crash.
     expect(resolveValueEntry(v, NaN)).toBeUndefined();
     expect(resolveValueEntry(v, Infinity)).toBeUndefined();

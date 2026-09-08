@@ -2,18 +2,25 @@ import { describe, expect, it } from "vitest";
 import { validatePacket } from "../src/validate.js";
 import type { Packet } from "../src/types.js";
 
-const msgs = (pkt: Packet): string[] => validatePacket(pkt).map((e) => e.message);
+const msgs = (pkt: Packet): string[] =>
+  validatePacket(pkt).map((e) => e.message);
 
 describe("validatePacket — structure", () => {
   it("accepts a minimal valid packet", () => {
     expect(validatePacket({ name: "t", body: [] })).toEqual([]);
   });
   it("rejects a bad field id", () => {
-    const e = msgs({ name: "t", body: [{ id: "1bad", name: "X", type: { kind: "int", bits: 8 } }] });
+    const e = msgs({
+      name: "t",
+      body: [{ id: "1bad", name: "X", type: { kind: "int", bits: 8 } }],
+    });
     expect(e.some((m) => /must match/.test(m))).toBe(true);
   });
   it("rejects a field id containing a dot", () => {
-    const e = msgs({ name: "t", body: [{ id: "a.b", name: "X", type: { kind: "int", bits: 8 } }] });
+    const e = msgs({
+      name: "t",
+      body: [{ id: "a.b", name: "X", type: { kind: "int", bits: 8 } }],
+    });
     expect(e.some((m) => /must match/.test(m))).toBe(true);
   });
 });
@@ -22,18 +29,26 @@ describe("validatePacket — expression placement", () => {
   it("rejects peek in bytes.n", () => {
     const e = msgs({
       name: "t",
-      body: [{ id: "d", name: "D", type: { kind: "bytes", n: { kind: "peek", bits: 8 } } }],
+      body: [
+        {
+          id: "d",
+          name: "D",
+          type: { kind: "bytes", n: { kind: "peek", bits: 8 } },
+        },
+      ],
     });
     expect(e.some((m) => /peek may not appear in bytes\.n/.test(m))).toBe(true);
   });
   it("allows peek in optional.when", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        kind: "optional",
-        when: { kind: "peek", bits: 8 },
-        container: { id: "x", name: "X", type: { kind: "int", bits: 8 } },
-      }],
+      body: [
+        {
+          kind: "optional",
+          when: { kind: "peek", bits: 8 },
+          container: { id: "x", name: "X", type: { kind: "int", bits: 8 } },
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
@@ -44,21 +59,45 @@ describe("validatePacket — expression placement", () => {
     for (const bad of [0, 65]) {
       const e = msgs({
         name: "t",
-        body: [{
-          kind: "switch", id: "s", on: { kind: "peek", bits: bad },
-          cases: { "0": { id: "a", fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] } },
-        }],
+        body: [
+          {
+            kind: "switch",
+            id: "s",
+            on: { kind: "peek", bits: bad },
+            cases: {
+              "0": {
+                id: "a",
+                fields: [
+                  { id: "x", name: "X", type: { kind: "int", bits: 8 } },
+                ],
+              },
+            },
+          },
+        ],
       });
-      expect(e.some((m) => /invalid discriminator expression/.test(m))).toBe(true);
+      expect(e.some((m) => /invalid discriminator expression/.test(m))).toBe(
+        true,
+      );
     }
     // Valid boundaries 1 and 64 are accepted.
     for (const good of [1, 64]) {
       const e = msgs({
         name: "t",
-        body: [{
-          kind: "switch", id: "s", on: { kind: "peek", bits: good },
-          cases: { "0": { id: "a", fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] } },
-        }],
+        body: [
+          {
+            kind: "switch",
+            id: "s",
+            on: { kind: "peek", bits: good },
+            cases: {
+              "0": {
+                id: "a",
+                fields: [
+                  { id: "x", name: "X", type: { kind: "int", bits: 8 } },
+                ],
+              },
+            },
+          },
+        ],
       });
       expect(e).toEqual([]);
     }
@@ -69,9 +108,22 @@ describe("validatePacket — expression placement", () => {
     const e = msgs({
       name: "t",
       body: [
-        { id: "seq64", name: "Sequence Number", type: { kind: "int", bits: 64 }, display: "dec" },
-        { id: "payloadLen", name: "Payload Length", type: { kind: "int", bits: 16 } },
-        { id: "payload", name: "Payload", type: { kind: "bytes", n: { kind: "ref", field: "payloadLen" } } },
+        {
+          id: "seq64",
+          name: "Sequence Number",
+          type: { kind: "int", bits: 64 },
+          display: "dec",
+        },
+        {
+          id: "payloadLen",
+          name: "Payload Length",
+          type: { kind: "int", bits: 16 },
+        },
+        {
+          id: "payload",
+          name: "Payload",
+          type: { kind: "bytes", n: { kind: "ref", field: "payloadLen" } },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -79,15 +131,28 @@ describe("validatePacket — expression placement", () => {
   it("rejects enclosingField outside constraints", () => {
     const e = msgs({
       name: "t",
-      body: [{ id: "d", name: "D", type: { kind: "bytes", n: { kind: "enclosingField", field: "len" } } }],
+      body: [
+        {
+          id: "d",
+          name: "D",
+          type: { kind: "bytes", n: { kind: "enclosingField", field: "len" } },
+        },
+      ],
     });
-    expect(e.some((m) => /enclosingField may only appear in constraints/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /enclosingField may only appear in constraints/.test(m)),
+    ).toBe(true);
   });
   it("allows enclosingField in constraints", () => {
     const e = msgs({
       name: "t",
       body: [{ id: "d", name: "D", type: { kind: "int", bits: 8 } }],
-      constraints: [{ lhs: { kind: "ref", field: "d" }, rhs: { kind: "enclosingField", field: "len" } }],
+      constraints: [
+        {
+          lhs: { kind: "ref", field: "d" },
+          rhs: { kind: "enclosingField", field: "len" },
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
@@ -97,25 +162,33 @@ describe("validatePacket — switch keys", () => {
   it("accepts decimal/range/list/_ keys", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        kind: "switch", id: "sw", on: { kind: "lit", value: 1 },
-        cases: {
-          "6": { id: "a", fields: [] },
-          "0-9": { id: "b", fields: [] },
-          "1,2,3": { id: "c", fields: [] },
-          _: { id: "d", fields: [] },
+      body: [
+        {
+          kind: "switch",
+          id: "sw",
+          on: { kind: "lit", value: 1 },
+          cases: {
+            "6": { id: "a", fields: [] },
+            "0-9": { id: "b", fields: [] },
+            "1,2,3": { id: "c", fields: [] },
+            _: { id: "d", fields: [] },
+          },
         },
-      }],
+      ],
     });
     expect(e).toEqual([]);
   });
   it("rejects a malformed switch key", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        kind: "switch", id: "sw", on: { kind: "lit", value: 1 },
-        cases: { "0x6": { id: "a", fields: [] } },
-      }],
+      body: [
+        {
+          kind: "switch",
+          id: "sw",
+          on: { kind: "lit", value: 1 },
+          cases: { "0x6": { id: "a", fields: [] } },
+        },
+      ],
     });
     expect(e.some((m) => /invalid switch case key/.test(m))).toBe(true);
   });
@@ -128,7 +201,14 @@ describe("validatePacket — lookup table keys/values (§4, §11.1)", () => {
       // `k` must be declared so the lookup's ref target exists (§D11); the test
       // exercises the lookup table key/value rules, not ref existence.
       { id: "k", name: "K", type: { kind: "int", bits: 8 } },
-      { id: "d", name: "D", type: { kind: "bytes", n: { kind: "lookup", key: { kind: "ref", field: "k" }, table } } },
+      {
+        id: "d",
+        name: "D",
+        type: {
+          kind: "bytes",
+          n: { kind: "lookup", key: { kind: "ref", field: "k" }, table },
+        },
+      },
     ],
   });
   it("accepts a table with non-negative decimal keys and values", () => {
@@ -139,7 +219,9 @@ describe("validatePacket — lookup table keys/values (§4, §11.1)", () => {
   });
   it("rejects a non-integer / non-decimal key", () => {
     expect(msgs(lookupPkt({ "01": 5 })).length).toBeGreaterThan(0);
-    expect(msgs(lookupPkt({ x: 5 } as Record<string, number>)).length).toBeGreaterThan(0);
+    expect(
+      msgs(lookupPkt({ x: 5 } as Record<string, number>)).length,
+    ).toBeGreaterThan(0);
   });
   it("rejects a negative value", () => {
     expect(msgs(lookupPkt({ "0": -3 })).length).toBeGreaterThan(0);
@@ -151,7 +233,11 @@ describe("validatePacket — remaining/enclosingBits placement (§11.1)", () => 
     const e = msgs({
       name: "t",
       body: [
-        { id: "d", name: "D", type: { kind: "bytes", n: { kind: "remaining" } } },
+        {
+          id: "d",
+          name: "D",
+          type: { kind: "bytes", n: { kind: "remaining" } },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -159,34 +245,69 @@ describe("validatePacket — remaining/enclosingBits placement (§11.1)", () => 
   it("allows remaining inside a bounded scope", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        kind: "bounded", id: "b", bytes: { kind: "lit", value: 8 },
-        fields: [{ id: "d", name: "D", type: { kind: "bytes", n: { kind: "remaining" } } }],
-      }],
+      body: [
+        {
+          kind: "bounded",
+          id: "b",
+          bytes: { kind: "lit", value: 8 },
+          fields: [
+            {
+              id: "d",
+              name: "D",
+              type: { kind: "bytes", n: { kind: "remaining" } },
+            },
+          ],
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
   it("rejects remaining/enclosingBits inside an encrypted.plaintext without wireBits", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        kind: "encrypted", id: "enc",
-        plaintext: { id: "pt", fields: [
-          { id: "d", name: "D", type: { kind: "bytes", n: { kind: "remaining" } } },
-        ] },
-      }],
+      body: [
+        {
+          kind: "encrypted",
+          id: "enc",
+          plaintext: {
+            id: "pt",
+            fields: [
+              {
+                id: "d",
+                name: "D",
+                type: { kind: "bytes", n: { kind: "remaining" } },
+              },
+            ],
+          },
+        },
+      ],
     });
-    expect(e.some((m) => /'remaining' used outside a scope-providing container/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /'remaining' used outside a scope-providing container/.test(m),
+      ),
+    ).toBe(true);
   });
   it("allows remaining inside an encrypted.plaintext with wireBits", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        kind: "encrypted", id: "enc", wireBits: { kind: "lit", value: 64 },
-        plaintext: { id: "pt", fields: [
-          { id: "d", name: "D", type: { kind: "bytes", n: { kind: "remaining" } } },
-        ] },
-      }],
+      body: [
+        {
+          kind: "encrypted",
+          id: "enc",
+          wireBits: { kind: "lit", value: 64 },
+          plaintext: {
+            id: "pt",
+            fields: [
+              {
+                id: "d",
+                name: "D",
+                type: { kind: "bytes", n: { kind: "remaining" } },
+              },
+            ],
+          },
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
@@ -198,7 +319,11 @@ describe("validatePacket — forward references (§10.1, §11.1)", () => {
       name: "t",
       body: [
         { id: "a", name: "A", type: { kind: "int", bits: 8 } },
-        { id: "len", name: "L", type: { kind: "bytes", n: { kind: "wireSize", target: "a" } } },
+        {
+          id: "len",
+          name: "L",
+          type: { kind: "bytes", n: { kind: "wireSize", target: "a" } },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -207,44 +332,84 @@ describe("validatePacket — forward references (§10.1, §11.1)", () => {
     const e = msgs({
       name: "t",
       body: [
-        { id: "len", name: "L", type: { kind: "bytes", n: { kind: "wireSize", target: "a" } } },
+        {
+          id: "len",
+          name: "L",
+          type: { kind: "bytes", n: { kind: "wireSize", target: "a" } },
+        },
         { id: "a", name: "A", type: { kind: "int", bits: 8 } },
       ],
     });
-    expect(e.some((m) => /does not precede this expression in document order/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /does not precede this expression in document order/.test(m),
+      ),
+    ).toBe(true);
   });
   it("rejects wireSize targeting an enclosing/not-yet-closed container", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        kind: "bounded", id: "b", bytes: { kind: "lit", value: 8 },
-        fields: [{ id: "d", name: "D", type: { kind: "bytes", n: { kind: "wireSize", target: "b" } } }],
-      }],
+      body: [
+        {
+          kind: "bounded",
+          id: "b",
+          bytes: { kind: "lit", value: 8 },
+          fields: [
+            {
+              id: "d",
+              name: "D",
+              type: { kind: "bytes", n: { kind: "wireSize", target: "b" } },
+            },
+          ],
+        },
+      ],
     });
-    expect(e.some((m) => /enclosing\/not-yet-closed container/.test(m))).toBe(true);
+    expect(e.some((m) => /enclosing\/not-yet-closed container/.test(m))).toBe(
+      true,
+    );
   });
   it("rejects a ref to a repeat id that precedes that repeat", () => {
     const e = msgs({
       name: "t",
       body: [
-        { id: "n", name: "N", type: { kind: "bytes", n: { kind: "ref", field: "r" } } },
         {
-          kind: "repeat", id: "r", count: { kind: "lit", value: 1 },
-          element: { id: "el", fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }] },
+          id: "n",
+          name: "N",
+          type: { kind: "bytes", n: { kind: "ref", field: "r" } },
+        },
+        {
+          kind: "repeat",
+          id: "r",
+          count: { kind: "lit", value: 1 },
+          element: {
+            id: "el",
+            fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }],
+          },
         },
       ],
     });
-    expect(e.some((m) => /precedes that repeat in document order/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /precedes that repeat in document order/.test(m)),
+    ).toBe(true);
   });
   it("allows a ref to a repeat id after that repeat", () => {
     const e = msgs({
       name: "t",
       body: [
         {
-          kind: "repeat", id: "r", count: { kind: "lit", value: 1 },
-          element: { id: "el", fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }] },
+          kind: "repeat",
+          id: "r",
+          count: { kind: "lit", value: 1 },
+          element: {
+            id: "el",
+            fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }],
+          },
         },
-        { id: "n", name: "N", type: { kind: "bytes", n: { kind: "ref", field: "r" } } },
+        {
+          id: "n",
+          name: "N",
+          type: { kind: "bytes", n: { kind: "ref", field: "r" } },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -255,7 +420,11 @@ describe("validatePacket — forward references (§10.1, §11.1)", () => {
       name: "t",
       body: [
         { id: "len", name: "L", type: { kind: "int", bits: 8 } },
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "ref", field: "len" } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "ref", field: "len" } },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -265,48 +434,94 @@ describe("validatePacket — forward references (§10.1, §11.1)", () => {
     const e = msgs({
       name: "t",
       body: [
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "ref", field: "len" } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "ref", field: "len" } },
+        },
         { id: "len", name: "L", type: { kind: "int", bits: 8 } },
       ],
     });
-    expect(e.some((m) => /ref target "len" does not precede this expression in document order/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /ref target "len" does not precede this expression in document order/.test(
+          m,
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("rejects a self-size ref (a field's bytes.n referencing its own id, §10.1)", () => {
     const e = msgs({
       name: "t",
       body: [
-        { id: "self", name: "Self", type: { kind: "bytes", n: { kind: "ref", field: "self" } } },
+        {
+          id: "self",
+          name: "Self",
+          type: { kind: "bytes", n: { kind: "ref", field: "self" } },
+        },
       ],
     });
-    expect(e.some((m) => /ref target "self" does not precede this expression in document order, or refers to its own container/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /ref target "self" does not precede this expression in document order, or refers to its own container/.test(
+          m,
+        ),
+      ),
+    ).toBe(true);
   });
 
   it("rejects a forward leaf ref in optional.when, switch.on, bounded.bytes, and virtual.expr", () => {
     const when = msgs({
       name: "t",
       body: [
-        { kind: "optional", when: { kind: "ref", field: "flag" }, container: { id: "x", name: "X", type: { kind: "int", bits: 8 } } },
+        {
+          kind: "optional",
+          when: { kind: "ref", field: "flag" },
+          container: { id: "x", name: "X", type: { kind: "int", bits: 8 } },
+        },
         { id: "flag", name: "Flag", type: { kind: "int", bits: 8 } },
       ],
     });
-    expect(when.some((m) => /does not precede this expression in document order/.test(m))).toBe(true);
+    expect(
+      when.some((m) =>
+        /does not precede this expression in document order/.test(m),
+      ),
+    ).toBe(true);
     const on = msgs({
       name: "t",
       body: [
-        { kind: "switch", id: "s", on: { kind: "ref", field: "tag" }, cases: { _: { id: "d", fields: [] } } },
+        {
+          kind: "switch",
+          id: "s",
+          on: { kind: "ref", field: "tag" },
+          cases: { _: { id: "d", fields: [] } },
+        },
         { id: "tag", name: "Tag", type: { kind: "int", bits: 8 } },
       ],
     });
-    expect(on.some((m) => /does not precede this expression in document order/.test(m))).toBe(true);
+    expect(
+      on.some((m) =>
+        /does not precede this expression in document order/.test(m),
+      ),
+    ).toBe(true);
     const bnd = msgs({
       name: "t",
       body: [
-        { kind: "bounded", id: "b", bytes: { kind: "ref", field: "blen" }, fields: [] },
+        {
+          kind: "bounded",
+          id: "b",
+          bytes: { kind: "ref", field: "blen" },
+          fields: [],
+        },
         { id: "blen", name: "BLen", type: { kind: "int", bits: 8 } },
       ],
     });
-    expect(bnd.some((m) => /does not precede this expression in document order/.test(m))).toBe(true);
+    expect(
+      bnd.some((m) =>
+        /does not precede this expression in document order/.test(m),
+      ),
+    ).toBe(true);
     const vrt = msgs({
       name: "t",
       body: [
@@ -314,17 +529,36 @@ describe("validatePacket — forward references (§10.1, §11.1)", () => {
         { id: "w", name: "W", type: { kind: "int", bits: 8 } },
       ],
     });
-    expect(vrt.some((m) => /does not precede this expression in document order/.test(m))).toBe(true);
+    expect(
+      vrt.some((m) =>
+        /does not precede this expression in document order/.test(m),
+      ),
+    ).toBe(true);
   });
 
   it("allows a dotted ref-expanded target declared earlier (src.oct0), forward-check aware of subtree ids", () => {
-    const def = { addr: { id: "addr", fields: [{ id: "oct0", name: "Octet 0", type: { kind: "int" as const, bits: 8 } }] } };
+    const def = {
+      addr: {
+        id: "addr",
+        fields: [
+          {
+            id: "oct0",
+            name: "Octet 0",
+            type: { kind: "int" as const, bits: 8 },
+          },
+        ],
+      },
+    };
     const e = msgs({
       name: "t",
       defs: def,
       body: [
         { kind: "ref", ref: "addr", id: "src", name: "Source" },
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "ref", field: "src.oct0" } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "ref", field: "src.oct0" } },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -339,11 +573,16 @@ describe("validatePacket — forward references (§10.1, §11.1)", () => {
       name: "t",
       body: [
         {
-          kind: "repeat", id: "rep", count: { until: { kind: "ref", field: "more" } },
-          element: { id: "el", fields: [
-            { id: "more", name: "More", type: { kind: "int", bits: 1 } },
-            { id: "val", name: "Val", type: { kind: "int", bits: 7 } },
-          ] },
+          kind: "repeat",
+          id: "rep",
+          count: { until: { kind: "ref", field: "more" } },
+          element: {
+            id: "el",
+            fields: [
+              { id: "more", name: "More", type: { kind: "int", bits: 1 } },
+              { id: "val", name: "Val", type: { kind: "int", bits: 7 } },
+            ],
+          },
         },
       ],
     } as unknown as Packet);
@@ -355,15 +594,27 @@ describe("validatePacket — forward references (§10.1, §11.1)", () => {
       name: "t",
       body: [
         {
-          kind: "repeat", id: "rep",
-          count: { until: {
-            kind: "op", op: "!=",
-            a: { kind: "ref", field: "tsn" },
-            b: { kind: "op", op: "+", a: { kind: "prevIter", field: "tsn" }, b: { kind: "lit", value: 1 } },
-          } },
-          element: { id: "el", fields: [
-            { id: "tsn", name: "TSN", type: { kind: "int", bits: 16 } },
-          ] },
+          kind: "repeat",
+          id: "rep",
+          count: {
+            until: {
+              kind: "op",
+              op: "!=",
+              a: { kind: "ref", field: "tsn" },
+              b: {
+                kind: "op",
+                op: "+",
+                a: { kind: "prevIter", field: "tsn" },
+                b: { kind: "lit", value: 1 },
+              },
+            },
+          },
+          element: {
+            id: "el",
+            fields: [
+              { id: "tsn", name: "TSN", type: { kind: "int", bits: 16 } },
+            ],
+          },
         },
       ],
     } as unknown as Packet);
@@ -376,10 +627,13 @@ describe("validatePacket — forward references (§10.1, §11.1)", () => {
       name: "t",
       body: [
         {
-          kind: "repeat", id: "rep", count: { kind: "ref", field: "n" },
-          element: { id: "el", fields: [
-            { id: "n", name: "N", type: { kind: "int", bits: 8 } },
-          ] },
+          kind: "repeat",
+          id: "rep",
+          count: { kind: "ref", field: "n" },
+          element: {
+            id: "el",
+            fields: [{ id: "n", name: "N", type: { kind: "int", bits: 8 } }],
+          },
         },
       ],
     } as unknown as Packet);
@@ -394,25 +648,47 @@ describe("validatePacket — forward references (§10.1, §11.1)", () => {
       name: "t",
       body: [
         {
-          kind: "repeat", id: "rep", count: { until: { kind: "ref", field: "sibOnly" } },
-          element: { id: "el", fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] },
+          kind: "repeat",
+          id: "rep",
+          count: { until: { kind: "ref", field: "sibOnly" } },
+          element: {
+            id: "el",
+            fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }],
+          },
         },
         { id: "sibOnly", name: "SibOnly", type: { kind: "int", bits: 8 } },
       ],
     } as unknown as Packet);
-    expect(later.some((m) => /does not precede this expression in document order|precedes that repeat/.test(m))).toBe(true);
+    expect(
+      later.some((m) =>
+        /does not precede this expression in document order|precedes that repeat/.test(
+          m,
+        ),
+      ),
+    ).toBe(true);
     // A self-ref to the repeat's OWN container id is excluded from the exempt
     // set (built from element.fields, not the container), so it still errors.
     const ownId = msgs({
       name: "t",
       body: [
         {
-          kind: "repeat", id: "rep", count: { kind: "ref", field: "rep" },
-          element: { id: "el", fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] },
+          kind: "repeat",
+          id: "rep",
+          count: { kind: "ref", field: "rep" },
+          element: {
+            id: "el",
+            fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }],
+          },
         },
       ],
     } as unknown as Packet);
-    expect(ownId.some((m) => /does not precede this expression in document order|precedes that repeat/.test(m))).toBe(true);
+    expect(
+      ownId.some((m) =>
+        /does not precede this expression in document order|precedes that repeat/.test(
+          m,
+        ),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -428,7 +704,10 @@ describe("validatePacket — berLength / imports / refs", () => {
     const e = msgs({
       name: "t",
       body: [],
-      imports: [{ source: "a", as: "x" }, { source: "b", as: "x" }],
+      imports: [
+        { source: "a", as: "x" },
+        { source: "b", as: "x" },
+      ],
     });
     expect(e.some((m) => /duplicate 'as' prefix/.test(m))).toBe(true);
   });
@@ -448,7 +727,11 @@ describe("validatePacket — berLength / imports / refs", () => {
       name: "t",
       body: [],
       defs: {
-        a: { id: "a", recursive: true, fields: [{ kind: "ref", ref: "a", id: "self" }] },
+        a: {
+          id: "a",
+          recursive: true,
+          fields: [{ kind: "ref", ref: "a", id: "self" }],
+        },
       },
     });
     expect(e).toEqual([]);
@@ -457,9 +740,18 @@ describe("validatePacket — berLength / imports / refs", () => {
     const e = msgs({
       name: "t",
       body: [],
-      defs: { a: { id: "a", fields: [{ kind: "virtual", id: "v", expr: { kind: "lit", value: 1 } }] } },
+      defs: {
+        a: {
+          id: "a",
+          fields: [
+            { kind: "virtual", id: "v", expr: { kind: "lit", value: 1 } },
+          ],
+        },
+      },
     });
-    expect(e.some((m) => /virtual.*forbidden inside a defs/.test(m))).toBe(true);
+    expect(e.some((m) => /virtual.*forbidden inside a defs/.test(m))).toBe(
+      true,
+    );
   });
 });
 
@@ -472,7 +764,10 @@ describe("validatePacket — prevIter placement (§10.4, fix #5)", () => {
           kind: "repeat",
           id: "r",
           count: { kind: "prevIter", field: "n" },
-          element: { id: "el", fields: [{ id: "n", name: "N", type: { kind: "int", bits: 8 } }] },
+          element: {
+            id: "el",
+            fields: [{ id: "n", name: "N", type: { kind: "int", bits: 8 } }],
+          },
         },
       ],
     });
@@ -486,8 +781,20 @@ describe("validatePacket — prevIter placement (§10.4, fix #5)", () => {
         {
           kind: "repeat",
           id: "r",
-          count: { until: { kind: "op", op: "==", a: { kind: "prevIter", field: "more" }, b: { kind: "lit", value: 0 } } },
-          element: { id: "el", fields: [{ id: "more", name: "More", type: { kind: "int", bits: 1 } }] },
+          count: {
+            until: {
+              kind: "op",
+              op: "==",
+              a: { kind: "prevIter", field: "more" },
+              b: { kind: "lit", value: 0 },
+            },
+          },
+          element: {
+            id: "el",
+            fields: [
+              { id: "more", name: "More", type: { kind: "int", bits: 1 } },
+            ],
+          },
         },
       ],
     });
@@ -501,7 +808,11 @@ describe("validatePacket — prevIter placement (§10.4, fix #5)", () => {
         { kind: "virtual", id: "v", expr: { kind: "prevIter", field: "x" } },
       ],
     });
-    expect(e.some((m) => /prevIter may only appear in repeat\.count or repeat\.until/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /prevIter may only appear in repeat\.count or repeat\.until/.test(m),
+      ),
+    ).toBe(true);
   });
 
   it("rejects a surplus key on the repeat count until-object (mirrors schema additionalProperties:false)", () => {
@@ -512,138 +823,313 @@ describe("validatePacket — prevIter placement (§10.4, fix #5)", () => {
           kind: "repeat",
           id: "r",
           count: { until: { kind: "lit", value: 0 }, foo: 9 } as never,
-          element: { id: "el", fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }] },
+          element: {
+            id: "el",
+            fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }],
+          },
         },
       ],
     });
-    expect(e.some((m) => /repeat count until-object accepts only the "until" key \(got "foo"\)/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /repeat count until-object accepts only the "until" key \(got "foo"\)/.test(
+          m,
+        ),
+      ),
+    ).toBe(true);
   });
 });
 
 describe("validatePacket — value dictionaries (§5.3)", () => {
   it("accepts a well-formed values array", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "dscp", name: "DSCP", type: { kind: "int", bits: 6 },
-      values: [
-        { value: 46, name: "EF", label: "Expedited Forwarding", level: "must" },
-        { range: [8, 8], name: "CS1", meta: { rfc: 2474 } },
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "dscp",
+          name: "DSCP",
+          type: { kind: "int", bits: 6 },
+          values: [
+            {
+              value: 46,
+              name: "EF",
+              label: "Expedited Forwarding",
+              level: "must",
+            },
+            { range: [8, 8], name: "CS1", meta: { rfc: 2474 } },
+          ],
+        },
       ],
-    }] });
+    });
     expect(e).toEqual([]);
   });
   it("accepts a values entry whose meta.rfc is the multi-layer object form", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "dscp", name: "DSCP", type: { kind: "int", bits: 6 },
-      values: [{ value: 0, name: "CS0", meta: { rfc: { defined: 2474, updates: [3260, 8622] } } }],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "dscp",
+          name: "DSCP",
+          type: { kind: "int", bits: 6 },
+          values: [
+            {
+              value: 0,
+              name: "CS0",
+              meta: { rfc: { defined: 2474, updates: [3260, 8622] } },
+            },
+          ],
+        },
+      ],
+    });
     expect(e).toEqual([]);
   });
   it("rejects an entry with both value and range", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 },
-      values: [{ value: 1, range: [2, 3] }],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: [{ value: 1, range: [2, 3] }],
+        },
+      ],
+    });
     expect(e.some((m) => /exactly one of 'value'/.test(m))).toBe(true);
   });
   it("rejects an entry with neither value nor range", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 }, values: [{ name: "x" }],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: [{ name: "x" }],
+        },
+      ],
+    });
     expect(e.some((m) => /exactly one of 'value'/.test(m))).toBe(true);
   });
   it("rejects a malformed range (min > max)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 }, values: [{ range: [5, 2] }],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: [{ range: [5, 2] }],
+        },
+      ],
+    });
     expect(e.some((m) => /range must be/.test(m))).toBe(true);
   });
   it("rejects a range with the wrong arity (matches the schema's minItems/maxItems: 2)", () => {
-    expect(msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 }, values: [{ range: [8] as never }],
-    }] }).some((m) => /range must be/.test(m))).toBe(true);
-    expect(msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 }, values: [{ range: [1, 2, 8] as never }],
-    }] }).some((m) => /range must be/.test(m))).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            id: "f",
+            name: "F",
+            type: { kind: "int", bits: 8 },
+            values: [{ range: [8] as never }],
+          },
+        ],
+      }).some((m) => /range must be/.test(m)),
+    ).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            id: "f",
+            name: "F",
+            type: { kind: "int", bits: 8 },
+            values: [{ range: [1, 2, 8] as never }],
+          },
+        ],
+      }).some((m) => /range must be/.test(m)),
+    ).toBe(true);
   });
   it("rejects a non-integer value (§5.3)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 }, values: [{ value: 4.6 }],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: [{ value: 4.6 }],
+        },
+      ],
+    });
     expect(e.some((m) => /value must be an integer/.test(m))).toBe(true);
   });
   it("rejects non-string name/label/doc (matches the schema's type: string, e.g. YAML `name: 404`)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "status", name: "Status", type: { kind: "int", bits: 16 },
-      values: [{ value: 404, name: 404 as never, label: 0 as never, doc: ["x"] as never }],
-    }] });
-    expect(e.some((m) => /values\[0\]: name must be a string/.test(m))).toBe(true);
-    expect(e.some((m) => /values\[0\]: label must be a string/.test(m))).toBe(true);
-    expect(e.some((m) => /values\[0\]: doc must be a string/.test(m))).toBe(true);
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "status",
+          name: "Status",
+          type: { kind: "int", bits: 16 },
+          values: [
+            {
+              value: 404,
+              name: 404 as never,
+              label: 0 as never,
+              doc: ["x"] as never,
+            },
+          ],
+        },
+      ],
+    });
+    expect(e.some((m) => /values\[0\]: name must be a string/.test(m))).toBe(
+      true,
+    );
+    expect(e.some((m) => /values\[0\]: label must be a string/.test(m))).toBe(
+      true,
+    );
+    expect(e.some((m) => /values\[0\]: doc must be a string/.test(m))).toBe(
+      true,
+    );
   });
   it("rejects an invalid level on a value entry", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 },
-      values: [{ value: 1, level: "required" as never }],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: [{ value: 1, level: "required" as never }],
+        },
+      ],
+    });
     expect(e.some((m) => /invalid level/.test(m))).toBe(true);
   });
   it("accepts a pattern bit-predicate entry (§5.3)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "dscp", name: "DSCP", type: { kind: "int", bits: 6 },
-      values: [{ pattern: "xxxx11", name: "EXP", level: "may" }],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "dscp",
+          name: "DSCP",
+          type: { kind: "int", bits: 6 },
+          values: [{ pattern: "xxxx11", name: "EXP", level: "may" }],
+        },
+      ],
+    });
     expect(e).toEqual([]);
   });
   it("rejects a pattern with illegal characters (§5.3)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 },
-      values: [{ pattern: "xx12" }],
-    }] });
-    expect(e.some((m) => /pattern must be a non-empty string/.test(m))).toBe(true);
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: [{ pattern: "xx12" }],
+        },
+      ],
+    });
+    expect(e.some((m) => /pattern must be a non-empty string/.test(m))).toBe(
+      true,
+    );
   });
   it("rejects mixing value and pattern (§5.3)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 },
-      values: [{ value: 1, pattern: "xx11" }],
-    }] });
-    expect(e.some((m) => /exactly one of 'value', 'range', or 'pattern'/.test(m))).toBe(true);
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: [{ value: 1, pattern: "xx11" }],
+        },
+      ],
+    });
+    expect(
+      e.some((m) => /exactly one of 'value', 'range', or 'pattern'/.test(m)),
+    ).toBe(true);
   });
   it("accepts negative value/range on a signed field (§5.3)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "off", name: "Offset", type: { kind: "int", bits: 8, signed: true },
-      values: [
-        { value: -1, name: "SENTINEL" },
-        { range: [-8, -1], name: "NEG_BAND" },
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "off",
+          name: "Offset",
+          type: { kind: "int", bits: 8, signed: true },
+          values: [
+            { value: -1, name: "SENTINEL" },
+            { range: [-8, -1], name: "NEG_BAND" },
+          ],
+        },
       ],
-    }] });
+    });
     expect(e).toEqual([]);
   });
 });
 
 describe("validatePacket — values entries must be objects (§5.3)", () => {
   it("reports (not throws on) a null values entry, e.g. YAML `values: [~]`", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 }, values: [null as never],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: [null as never],
+        },
+      ],
+    });
     expect(e.some((m) => /values\[0\] must be an object/.test(m))).toBe(true);
   });
   it("reports an undefined values entry", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 }, values: [undefined as never],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: [undefined as never],
+        },
+      ],
+    });
     expect(e.some((m) => /values\[0\] must be an object/.test(m))).toBe(true);
   });
   it("reports a primitive values entry", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 }, values: ["x" as never],
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: ["x" as never],
+        },
+      ],
+    });
     expect(e.some((m) => /values\[0\] must be an object/.test(m))).toBe(true);
   });
   it("reports (not throws on) a non-array values, e.g. a forgotten YAML dash", () => {
-    const pkt: Packet = { name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 },
-      values: { value: 1, name: "A" } as never,
-    }] };
+    const pkt: Packet = {
+      name: "t",
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          values: { value: 1, name: "A" } as never,
+        },
+      ],
+    };
     expect(() => validatePacket(pkt)).not.toThrow();
     expect(msgs(pkt).some((m) => /values must be an array/.test(m))).toBe(true);
   });
@@ -652,196 +1138,491 @@ describe("validatePacket — values entries must be objects (§5.3)", () => {
 describe("validatePacket — meta.rfc shape (§5.4)", () => {
   const fieldWithMeta = (meta: unknown): Packet => ({
     name: "t",
-    body: [{ id: "f", name: "F", type: { kind: "int", bits: 8 }, meta: meta as never }],
+    body: [
+      {
+        id: "f",
+        name: "F",
+        type: { kind: "int", bits: 8 },
+        meta: meta as never,
+      },
+    ],
   });
   it("accepts the bare-number and { defined, updates } forms", () => {
     expect(msgs(fieldWithMeta({ rfc: 791 }))).toEqual([]);
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: [2474, 3168] } }))).toEqual([]);
+    expect(
+      msgs(fieldWithMeta({ rfc: { defined: 791, updates: [2474, 3168] } })),
+    ).toEqual([]);
     expect(msgs(fieldWithMeta({ rfc: { defined: 791 } }))).toEqual([]);
   });
   it("rejects an rfc object missing the required defined", () => {
     const e = msgs(fieldWithMeta({ rfc: { updates: [2474] } }));
-    expect(e.some((m) => /meta\.rfc must be an integer or \{ defined, updates\? \}/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /meta\.rfc must be an integer or \{ defined, updates\? \}/.test(m),
+      ),
+    ).toBe(true);
   });
   it("rejects a string / non-integer rfc", () => {
     expect(msgs(fieldWithMeta({ rfc: "791" })).length).toBeGreaterThan(0);
     expect(msgs(fieldWithMeta({ rfc: 791.5 })).length).toBeGreaterThan(0);
   });
   it("rejects surplus provenance keys (matches the schema's additionalProperties: false)", () => {
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, obsoletes: [760] } })).length).toBeGreaterThan(0);
+    expect(
+      msgs(fieldWithMeta({ rfc: { defined: 791, obsoletes: [760] } })).length,
+    ).toBeGreaterThan(0);
   });
   it("rejects non-integer updates entries", () => {
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: [1.5] } })).length).toBeGreaterThan(0);
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: "x" } })).length).toBeGreaterThan(0);
+    expect(
+      msgs(fieldWithMeta({ rfc: { defined: 791, updates: [1.5] } })).length,
+    ).toBeGreaterThan(0);
+    expect(
+      msgs(fieldWithMeta({ rfc: { defined: 791, updates: "x" } })).length,
+    ).toBeGreaterThan(0);
   });
   it("accepts object-form { rfc, section? } updates entries and bare+object mix (D8)", () => {
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: [{ rfc: 2474, section: "3" }] } }))).toEqual([]);
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: [2474, { rfc: 3168, section: "5" }] } }))).toEqual([]);
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: [{ rfc: 2474 }] } }))).toEqual([]);
+    expect(
+      msgs(
+        fieldWithMeta({
+          rfc: { defined: 791, updates: [{ rfc: 2474, section: "3" }] },
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      msgs(
+        fieldWithMeta({
+          rfc: { defined: 791, updates: [2474, { rfc: 3168, section: "5" }] },
+        }),
+      ),
+    ).toEqual([]);
+    expect(
+      msgs(fieldWithMeta({ rfc: { defined: 791, updates: [{ rfc: 2474 }] } })),
+    ).toEqual([]);
   });
   it("rejects malformed object-form updates entries (D8)", () => {
     // missing rfc
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: [{ section: "3" }] } })).length).toBeGreaterThan(0);
+    expect(
+      msgs(
+        fieldWithMeta({ rfc: { defined: 791, updates: [{ section: "3" }] } }),
+      ).length,
+    ).toBeGreaterThan(0);
     // surplus key
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: [{ rfc: 2474, foo: 1 }] } })).length).toBeGreaterThan(0);
+    expect(
+      msgs(
+        fieldWithMeta({
+          rfc: { defined: 791, updates: [{ rfc: 2474, foo: 1 }] },
+        }),
+      ).length,
+    ).toBeGreaterThan(0);
     // non-integer rfc
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: [{ rfc: "2474" }] } })).length).toBeGreaterThan(0);
+    expect(
+      msgs(fieldWithMeta({ rfc: { defined: 791, updates: [{ rfc: "2474" }] } }))
+        .length,
+    ).toBeGreaterThan(0);
     // non-string section
-    expect(msgs(fieldWithMeta({ rfc: { defined: 791, updates: [{ rfc: 2474, section: 3 }] } })).length).toBeGreaterThan(0);
+    expect(
+      msgs(
+        fieldWithMeta({
+          rfc: { defined: 791, updates: [{ rfc: 2474, section: 3 }] },
+        }),
+      ).length,
+    ).toBeGreaterThan(0);
   });
   it("checks packet meta, ValueEntry meta, group meta, and enum variant meta too", () => {
-    expect(msgs({ name: "t", body: [], meta: { rfc: { updates: [2474] } } as never })
-      .some((m) => /packet: meta\.rfc/.test(m))).toBe(true);
-    expect(msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 },
-      values: [{ value: 1, meta: { rfc: "x" } as never }],
-    }] }).some((m) => /values\[0\]: meta\.rfc/.test(m))).toBe(true);
-    expect(msgs({ name: "t", body: [{
-      kind: "group", id: "g", name: "G", meta: { rfc: [791] } as never,
-      children: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
-    }] }).some((m) => /meta\.rfc/.test(m))).toBe(true);
-    expect(msgs({ name: "t", body: [{
-      id: "p", name: "P",
-      type: { kind: "enum", bits: 8, variants: { "6": { label: "TCP", meta: { rfc: "793" } as never } } },
-    }] }).some((m) => /enum variant "6": meta\.rfc/.test(m))).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [],
+        meta: { rfc: { updates: [2474] } } as never,
+      }).some((m) => /packet: meta\.rfc/.test(m)),
+    ).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            id: "f",
+            name: "F",
+            type: { kind: "int", bits: 8 },
+            values: [{ value: 1, meta: { rfc: "x" } as never }],
+          },
+        ],
+      }).some((m) => /values\[0\]: meta\.rfc/.test(m)),
+    ).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            kind: "group",
+            id: "g",
+            name: "G",
+            meta: { rfc: [791] } as never,
+            children: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
+          },
+        ],
+      }).some((m) => /meta\.rfc/.test(m)),
+    ).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            id: "p",
+            name: "P",
+            type: {
+              kind: "enum",
+              bits: 8,
+              variants: {
+                "6": { label: "TCP", meta: { rfc: "793" } as never },
+              },
+            },
+          },
+        ],
+      }).some((m) => /enum variant "6": meta\.rfc/.test(m)),
+    ).toBe(true);
   });
   it("accepts meta on bounded and encrypted regions (§5.4)", () => {
-    expect(msgs({ name: "t", body: [
-      {
-        kind: "bounded", id: "b", bytes: { kind: "lit", value: 4 }, meta: { rfc: 9000 },
-        fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }],
-      },
-      {
-        kind: "encrypted", id: "e", meta: { rfc: { defined: 9001 } },
-        plaintext: { id: "pt", fields: [{ id: "y", name: "Y", type: { kind: "int", bits: 8 } }] },
-      },
-    ] })).toEqual([]);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            kind: "bounded",
+            id: "b",
+            bytes: { kind: "lit", value: 4 },
+            meta: { rfc: 9000 },
+            fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }],
+          },
+          {
+            kind: "encrypted",
+            id: "e",
+            meta: { rfc: { defined: 9001 } },
+            plaintext: {
+              id: "pt",
+              fields: [{ id: "y", name: "Y", type: { kind: "int", bits: 8 } }],
+            },
+          },
+        ],
+      }),
+    ).toEqual([]);
   });
   it("rejects a non-object meta", () => {
-    expect(msgs(fieldWithMeta(791)).some((m) => /meta must be an object/.test(m))).toBe(true);
+    expect(
+      msgs(fieldWithMeta(791)).some((m) => /meta must be an object/.test(m)),
+    ).toBe(true);
   });
 });
 
 describe("validatePacket — enum variant keys & level (§3)", () => {
   it("rejects a non-decimal variant key", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "p", name: "P", type: { kind: "enum", bits: 8, variants: { "0x6": { label: "TCP" } } as never },
-    }] });
-    expect(e.some((m) => /variant key .* non-negative decimal/.test(m))).toBe(true);
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "p",
+          name: "P",
+          type: {
+            kind: "enum",
+            bits: 8,
+            variants: { "0x6": { label: "TCP" } } as never,
+          },
+        },
+      ],
+    });
+    expect(e.some((m) => /variant key .* non-negative decimal/.test(m))).toBe(
+      true,
+    );
   });
   it("rejects an invalid level on an enum variant", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "p", name: "P", type: { kind: "enum", bits: 8, variants: { "6": { label: "TCP", level: "nope" as never } } },
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "p",
+          name: "P",
+          type: {
+            kind: "enum",
+            bits: 8,
+            variants: { "6": { label: "TCP", level: "nope" as never } },
+          },
+        },
+      ],
+    });
     expect(e.some((m) => /invalid level/.test(m))).toBe(true);
   });
   it("accepts string and object variants together", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "p", name: "P", type: { kind: "enum", bits: 8, variants: { "6": "TCP", "17": { label: "UDP", level: "may" } } },
-    }] });
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "p",
+          name: "P",
+          type: {
+            kind: "enum",
+            bits: 8,
+            variants: { "6": "TCP", "17": { label: "UDP", level: "may" } },
+          },
+        },
+      ],
+    });
     expect(e).toEqual([]);
   });
   it("rejects an enum without a variants table (matches the schema's required list)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "p", name: "P", type: { kind: "enum", bits: 8 } as never,
-    }] });
-    expect(e.some((m) => /enum must have a variants object/.test(m))).toBe(true);
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "p",
+          name: "P",
+          type: { kind: "enum", bits: 8 } as never,
+        },
+      ],
+    });
+    expect(e.some((m) => /enum must have a variants object/.test(m))).toBe(
+      true,
+    );
   });
   it("still accepts an empty variants table", () => {
-    expect(msgs({ name: "t", body: [{
-      id: "p", name: "P", type: { kind: "enum", bits: 8, variants: {} },
-    }] })).toEqual([]);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            id: "p",
+            name: "P",
+            type: { kind: "enum", bits: 8, variants: {} },
+          },
+        ],
+      }),
+    ).toEqual([]);
   });
   it("rejects a YAML-list variants (array is not a variants object, matches schema type: object)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "p", name: "P", type: { kind: "enum", bits: 2, variants: ["zero", "one"] as never },
-    }] });
-    expect(e.some((m) => /enum must have a variants object/.test(m))).toBe(true);
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "p",
+          name: "P",
+          type: { kind: "enum", bits: 2, variants: ["zero", "one"] as never },
+        },
+      ],
+    });
+    expect(e.some((m) => /enum must have a variants object/.test(m))).toBe(
+      true,
+    );
   });
   it("rejects an unknown key on a variant object (matches the schema's additionalProperties: false)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "p", name: "P",
-      type: { kind: "enum", bits: 8, variants: { "6": { label: "TCP", name: "TCP" } as never } },
-    }] });
-    expect(e.some((m) => /enum variant "6" has unknown key "name"/.test(m))).toBe(true);
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "p",
+          name: "P",
+          type: {
+            kind: "enum",
+            bits: 8,
+            variants: { "6": { label: "TCP", name: "TCP" } as never },
+          },
+        },
+      ],
+    });
+    expect(
+      e.some((m) => /enum variant "6" has unknown key "name"/.test(m)),
+    ).toBe(true);
   });
   it("rejects a non-string variant doc (matches the schema's type: string, e.g. YAML `doc: 793`)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "p", name: "P",
-      type: { kind: "enum", bits: 8, variants: { "6": { label: "TCP", doc: 793 as never } } },
-    }] });
-    expect(e.some((m) => /enum variant "6" doc must be a string/.test(m))).toBe(true);
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "p",
+          name: "P",
+          type: {
+            kind: "enum",
+            bits: 8,
+            variants: { "6": { label: "TCP", doc: 793 as never } },
+          },
+        },
+      ],
+    });
+    expect(e.some((m) => /enum variant "6" doc must be a string/.test(m))).toBe(
+      true,
+    );
   });
 });
 
 describe("validatePacket — meta key/shape parity with the schema (§5.4)", () => {
   const fieldWithMeta = (meta: unknown): Packet => ({
     name: "t",
-    body: [{ id: "f", name: "F", type: { kind: "int", bits: 8 }, meta: meta as never }],
+    body: [
+      {
+        id: "f",
+        name: "F",
+        type: { kind: "int", bits: 8 },
+        meta: meta as never,
+      },
+    ],
   });
   it("rejects a non-string meta.section (e.g. unquoted YAML `section: 4.10` → number 4.1)", () => {
     const e = msgs(fieldWithMeta({ rfc: 2474, section: 4.1 }));
     expect(e.some((m) => /meta\.section must be a string/.test(m))).toBe(true);
   });
   it("rejects unknown meta keys (matches the schema's additionalProperties: false)", () => {
-    expect(msgs(fieldWithMeta({ note: "x" })).some((m) => /meta has unknown key "note"/.test(m))).toBe(true);
+    expect(
+      msgs(fieldWithMeta({ note: "x" })).some((m) =>
+        /meta has unknown key "note"/.test(m),
+      ),
+    ).toBe(true);
     // typo'd "rcf" must not silently drop the provenance
-    expect(msgs(fieldWithMeta({ rcf: 791 })).some((m) => /meta has unknown key "rcf"/.test(m))).toBe(true);
+    expect(
+      msgs(fieldWithMeta({ rcf: 791 })).some((m) =>
+        /meta has unknown key "rcf"/.test(m),
+      ),
+    ).toBe(true);
   });
   it("checks section/unknown keys on packet meta, ValueEntry meta, and group meta too", () => {
-    expect(msgs({ name: "t", body: [], meta: { rfc: 791, section: 3.1 } as never })
-      .some((m) => /packet: meta\.section must be a string/.test(m))).toBe(true);
-    expect(msgs({ name: "t", body: [{
-      id: "f", name: "F", type: { kind: "int", bits: 8 },
-      values: [{ value: 1, meta: { section: 4.1 } as never }],
-    }] }).some((m) => /values\[0\]: meta\.section must be a string/.test(m))).toBe(true);
-    expect(msgs({ name: "t", body: [{
-      kind: "group", id: "g", name: "G", meta: { rfc: 791, bogus: 1 } as never,
-      children: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
-    }] }).some((m) => /meta has unknown key "bogus"/.test(m))).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [],
+        meta: { rfc: 791, section: 3.1 } as never,
+      }).some((m) => /packet: meta\.section must be a string/.test(m)),
+    ).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            id: "f",
+            name: "F",
+            type: { kind: "int", bits: 8 },
+            values: [{ value: 1, meta: { section: 4.1 } as never }],
+          },
+        ],
+      }).some((m) => /values\[0\]: meta\.section must be a string/.test(m)),
+    ).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            kind: "group",
+            id: "g",
+            name: "G",
+            meta: { rfc: 791, bogus: 1 } as never,
+            children: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
+          },
+        ],
+      }).some((m) => /meta has unknown key "bogus"/.test(m)),
+    ).toBe(true);
   });
   it("packet meta additionally allows aliases (schema PacketMeta); field meta does not", () => {
-    expect(msgs({ name: "t", body: [], meta: { rfc: 791, section: "3.1", aliases: ["IPv4"] } })).toEqual([]);
-    expect(msgs({ name: "t", body: [], meta: { aliases: "IPv4" } as never })
-      .some((m) => /meta\.aliases must be an array of strings/.test(m))).toBe(true);
-    expect(msgs(fieldWithMeta({ rfc: 791, aliases: ["F"] }))
-      .some((m) => /meta has unknown key "aliases"/.test(m))).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [],
+        meta: { rfc: 791, section: "3.1", aliases: ["IPv4"] },
+      }),
+    ).toEqual([]);
+    expect(
+      msgs({ name: "t", body: [], meta: { aliases: "IPv4" } as never }).some(
+        (m) => /meta\.aliases must be an array of strings/.test(m),
+      ),
+    ).toBe(true);
+    expect(
+      msgs(fieldWithMeta({ rfc: 791, aliases: ["F"] })).some((m) =>
+        /meta has unknown key "aliases"/.test(m),
+      ),
+    ).toBe(true);
   });
   it("packet meta accepts free-form classification tags/family; checks only shape (§1.1)", () => {
-    expect(msgs({ name: "t", body: [], meta: { rfc: 4271, family: "bgp", tags: ["routing", "tcp-based"] } })).toEqual([]);
-    expect(msgs({ name: "t", body: [], meta: { tags: "routing" } as never })
-      .some((m) => /meta\.tags must be an array of strings/.test(m))).toBe(true);
-    expect(msgs({ name: "t", body: [], meta: { tags: ["ok", 5] } as never })
-      .some((m) => /meta\.tags must be an array of strings/.test(m))).toBe(true);
-    expect(msgs({ name: "t", body: [], meta: { family: ["bgp"] } as never })
-      .some((m) => /meta\.family must be a string/.test(m))).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [],
+        meta: { rfc: 4271, family: "bgp", tags: ["routing", "tcp-based"] },
+      }),
+    ).toEqual([]);
+    expect(
+      msgs({ name: "t", body: [], meta: { tags: "routing" } as never }).some(
+        (m) => /meta\.tags must be an array of strings/.test(m),
+      ),
+    ).toBe(true);
+    expect(
+      msgs({ name: "t", body: [], meta: { tags: ["ok", 5] } as never }).some(
+        (m) => /meta\.tags must be an array of strings/.test(m),
+      ),
+    ).toBe(true);
+    expect(
+      msgs({ name: "t", body: [], meta: { family: ["bgp"] } as never }).some(
+        (m) => /meta\.family must be a string/.test(m),
+      ),
+    ).toBe(true);
     // tags/family are packet-level only — not allowed on field meta
-    expect(msgs(fieldWithMeta({ tags: ["x"] }))
-      .some((m) => /meta has unknown key "tags"/.test(m))).toBe(true);
+    expect(
+      msgs(fieldWithMeta({ tags: ["x"] })).some((m) =>
+        /meta has unknown key "tags"/.test(m),
+      ),
+    ).toBe(true);
   });
 });
 
 describe("validatePacket — ValueEntry unknown keys (§5.3)", () => {
   it("rejects a typo'd annotation key (matches the schema's additionalProperties: false)", () => {
-    const e = msgs({ name: "t", body: [{
-      id: "dscp", name: "DSCP", type: { kind: "int", bits: 6 },
-      values: [{ value: 46, lable: "EF" } as never],
-    }] });
-    expect(e.some((m) => /values\[0\] has unknown key "lable"/.test(m))).toBe(true);
+    const e = msgs({
+      name: "t",
+      body: [
+        {
+          id: "dscp",
+          name: "DSCP",
+          type: { kind: "int", bits: 6 },
+          values: [{ value: 46, lable: "EF" } as never],
+        },
+      ],
+    });
+    expect(e.some((m) => /values\[0\] has unknown key "lable"/.test(m))).toBe(
+      true,
+    );
   });
   it("accepts every documented ValueEntry key", () => {
-    expect(msgs({ name: "t", body: [{
-      id: "dscp", name: "DSCP", type: { kind: "int", bits: 6 },
-      values: [{ value: 46, name: "EF", label: "Expedited", doc: "RFC 3246", level: "must", meta: { rfc: 3246 } }],
-    }] })).toEqual([]);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            id: "dscp",
+            name: "DSCP",
+            type: { kind: "int", bits: 6 },
+            values: [
+              {
+                value: 46,
+                name: "EF",
+                label: "Expedited",
+                doc: "RFC 3246",
+                level: "must",
+                meta: { rfc: 3246 },
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual([]);
   });
 });
 
 describe("validatePacket — constraint level (§9.1)", () => {
   it("rejects an invalid constraint level", () => {
-    const e = validatePacket({ name: "t", body: [], constraints: [
-      { lhs: { kind: "ref", field: "a" }, rhs: { kind: "lit", value: 1 }, level: "strong" as never },
-    ] }).map((x) => x.message);
+    const e = validatePacket({
+      name: "t",
+      body: [],
+      constraints: [
+        {
+          lhs: { kind: "ref", field: "a" },
+          rhs: { kind: "lit", value: 1 },
+          level: "strong" as never,
+        },
+      ],
+    }).map((x) => x.message);
     expect(e.some((m) => /invalid level/.test(m))).toBe(true);
   });
   it("accepts must / should / may constraint levels", () => {
@@ -849,9 +1630,21 @@ describe("validatePacket — constraint level (§9.1)", () => {
       name: "t",
       body: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
       constraints: [
-        { lhs: { kind: "ref", field: "a" }, rhs: { kind: "lit", value: 1 }, level: "must" },
-        { lhs: { kind: "ref", field: "a" }, rhs: { kind: "lit", value: 1 }, level: "should" },
-        { lhs: { kind: "ref", field: "a" }, rhs: { kind: "lit", value: 1 }, level: "may" },
+        {
+          lhs: { kind: "ref", field: "a" },
+          rhs: { kind: "lit", value: 1 },
+          level: "must",
+        },
+        {
+          lhs: { kind: "ref", field: "a" },
+          rhs: { kind: "lit", value: 1 },
+          level: "should",
+        },
+        {
+          lhs: { kind: "ref", field: "a" },
+          rhs: { kind: "lit", value: 1 },
+          level: "may",
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -864,29 +1657,48 @@ describe("validatePacket — constraint keys & doc parity with the schema (§9)"
       name: "t",
       body: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
       constraints: [
-        { lhs: { kind: "ref", field: "a" }, rhs: { kind: "lit", value: 5 }, leval: "should" } as never,
+        {
+          lhs: { kind: "ref", field: "a" },
+          rhs: { kind: "lit", value: 5 },
+          leval: "should",
+        } as never,
       ],
     });
-    expect(e.some((m) => /constraints\[0\] has unknown key "leval"/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /constraints\[0\] has unknown key "leval"/.test(m)),
+    ).toBe(true);
   });
   it("rejects a non-string constraint doc (matches the schema's type: string)", () => {
     const e = msgs({
       name: "t",
       body: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
       constraints: [
-        { lhs: { kind: "ref", field: "a" }, rhs: { kind: "lit", value: 5 }, doc: 3.1 as never },
+        {
+          lhs: { kind: "ref", field: "a" },
+          rhs: { kind: "lit", value: 5 },
+          doc: 3.1 as never,
+        },
       ],
     });
-    expect(e.some((m) => /constraints\[0\]: doc must be a string/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /constraints\[0\]: doc must be a string/.test(m)),
+    ).toBe(true);
   });
   it("accepts every documented constraint key", () => {
-    expect(msgs({
-      name: "t",
-      body: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
-      constraints: [
-        { lhs: { kind: "ref", field: "a" }, rhs: { kind: "lit", value: 5 }, doc: "RFC 793 §3.1", level: "should" },
-      ],
-    })).toEqual([]);
+    expect(
+      msgs({
+        name: "t",
+        body: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
+        constraints: [
+          {
+            lhs: { kind: "ref", field: "a" },
+            rhs: { kind: "lit", value: 5 },
+            doc: "RFC 793 §3.1",
+            level: "should",
+          },
+        ],
+      }),
+    ).toEqual([]);
   });
 });
 
@@ -904,11 +1716,23 @@ describe("validatePacket — defs struct meta (§5.4, §6)", () => {
   });
   it("accepts meta (bare and multi-layer rfc) on a defs struct", () => {
     expect(msgs(defsPacket({ rfc: 791 }))).toEqual([]);
-    expect(msgs(defsPacket({ rfc: { defined: 791, updates: [2474] }, section: "3.1" }))).toEqual([]);
+    expect(
+      msgs(
+        defsPacket({ rfc: { defined: 791, updates: [2474] }, section: "3.1" }),
+      ),
+    ).toEqual([]);
   });
   it("validates the meta shape on a defs struct like every other level", () => {
-    expect(msgs(defsPacket({ rfc: "791" })).some((m) => /defs\/foo: meta\.rfc must be an integer/.test(m))).toBe(true);
-    expect(msgs(defsPacket({ bogus: 1 })).some((m) => /defs\/foo: meta has unknown key "bogus"/.test(m))).toBe(true);
+    expect(
+      msgs(defsPacket({ rfc: "791" })).some((m) =>
+        /defs\/foo: meta\.rfc must be an integer/.test(m),
+      ),
+    ).toBe(true);
+    expect(
+      msgs(defsPacket({ bogus: 1 })).some((m) =>
+        /defs\/foo: meta has unknown key "bogus"/.test(m),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -919,17 +1743,34 @@ describe("validatePacket — defs struct meta (§5.4, §6)", () => {
 describe("validatePacket — checksumParams / algorithm (§8/§11.1)", () => {
   const cksum = (algorithm: string, withParams: boolean): Packet => ({
     name: "t",
-    body: [{
-      id: "fcs", name: "FCS", type: { kind: "int", bits: 32 }, category: "checksum",
-      checksumAlgorithm: algorithm,
-      ...(withParams ? { checksumParams: { polynomial: 0x04c11db7 } } : {}),
-    }],
+    body: [
+      {
+        id: "fcs",
+        name: "FCS",
+        type: { kind: "int", bits: 32 },
+        category: "checksum",
+        checksumAlgorithm: algorithm,
+        ...(withParams ? { checksumParams: { polynomial: 0x04c11db7 } } : {}),
+      },
+    ],
   });
   it("rejects checksumParams with the non-CRC algorithm internet", () => {
-    expect(msgs(cksum("internet", true)).some((m) => /checksumParams cannot be used with the non-CRC algorithm "internet"/.test(m))).toBe(true);
+    expect(
+      msgs(cksum("internet", true)).some((m) =>
+        /checksumParams cannot be used with the non-CRC algorithm "internet"/.test(
+          m,
+        ),
+      ),
+    ).toBe(true);
   });
   it("rejects checksumParams with the non-CRC algorithm adler32", () => {
-    expect(msgs(cksum("adler32", true)).some((m) => /checksumParams cannot be used with the non-CRC algorithm "adler32"/.test(m))).toBe(true);
+    expect(
+      msgs(cksum("adler32", true)).some((m) =>
+        /checksumParams cannot be used with the non-CRC algorithm "adler32"/.test(
+          m,
+        ),
+      ),
+    ).toBe(true);
   });
   it("accepts checksumParams with a CRC algorithm (crc32, custom name)", () => {
     expect(msgs(cksum("crc32", true))).toEqual([]);
@@ -948,15 +1789,40 @@ describe("validatePacket — checksumParams / algorithm (§8/§11.1)", () => {
 describe("validatePacket — category token closure (§5.1)", () => {
   const cat = (category: string): Packet => ({
     name: "t",
-    body: [{ id: "f", name: "F", type: { kind: "int", bits: 8 }, category: category as never }],
+    body: [
+      {
+        id: "f",
+        name: "F",
+        type: { kind: "int", bits: 8 },
+        category: category as never,
+      },
+    ],
   });
   it("accepts each of the nine category tokens", () => {
-    for (const t of ["addressing", "identifier", "length", "type", "flags", "reserved", "checksum", "variable", "payload-marker"])
+    for (const t of [
+      "addressing",
+      "identifier",
+      "length",
+      "type",
+      "flags",
+      "reserved",
+      "checksum",
+      "variable",
+      "payload-marker",
+    ])
       expect(msgs(cat(t))).toEqual([]);
   });
   it("rejects an unknown category token", () => {
-    expect(msgs(cat("checsum")).some((m) => /category "checsum" is not one of the nine category tokens/.test(m))).toBe(true);
-    expect(msgs(cat("padding")).some((m) => /category "padding" is not one of the nine category tokens/.test(m))).toBe(true);
+    expect(
+      msgs(cat("checsum")).some((m) =>
+        /category "checsum" is not one of the nine category tokens/.test(m),
+      ),
+    ).toBe(true);
+    expect(
+      msgs(cat("padding")).some((m) =>
+        /category "padding" is not one of the nine category tokens/.test(m),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -967,10 +1833,30 @@ describe("validatePacket — expanded-id collisions (§2/§11.1, D10)", () => {
       body: [
         { id: "protocol", name: "Protocol", type: { kind: "int", bits: 8 } },
         {
-          kind: "switch", id: "payload", on: { kind: "ref", field: "protocol" },
+          kind: "switch",
+          id: "payload",
+          on: { kind: "ref", field: "protocol" },
           cases: {
-            "6": { id: "tcp", fields: [{ id: "srcPort", name: "Source Port", type: { kind: "int", bits: 16 } }] },
-            "17": { id: "udp", fields: [{ id: "srcPort", name: "Source Port", type: { kind: "int", bits: 16 } }] },
+            "6": {
+              id: "tcp",
+              fields: [
+                {
+                  id: "srcPort",
+                  name: "Source Port",
+                  type: { kind: "int", bits: 16 },
+                },
+              ],
+            },
+            "17": {
+              id: "udp",
+              fields: [
+                {
+                  id: "srcPort",
+                  name: "Source Port",
+                  type: { kind: "int", bits: 16 },
+                },
+              ],
+            },
           },
         },
       ],
@@ -986,7 +1872,9 @@ describe("validatePacket — expanded-id collisions (§2/§11.1, D10)", () => {
         { id: "foo", name: "Foo2", type: { kind: "int", bits: 8 } },
       ],
     });
-    expect(e.some((m) => /expanded id "foo" is declared more than once/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /expanded id "foo" is declared more than once/.test(m)),
+    ).toBe(true);
   });
 
   it("rejects two refs sharing the same instantiation id", () => {
@@ -996,10 +1884,21 @@ describe("validatePacket — expanded-id collisions (§2/§11.1, D10)", () => {
         { kind: "ref", ref: "addr", id: "src", name: "Source" },
         { kind: "ref", ref: "addr", id: "src", name: "Dup" },
       ],
-      defs: { addr: { id: "addr", fields: [{ id: "oct0", name: "Octet 0", type: { kind: "int", bits: 8 } }] } },
+      defs: {
+        addr: {
+          id: "addr",
+          fields: [
+            { id: "oct0", name: "Octet 0", type: { kind: "int", bits: 8 } },
+          ],
+        },
+      },
     });
     // "src" and "src.oct0" both collide.
-    expect(e.some((m) => /expanded id "src(\.oct0)?" is declared more than once/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /expanded id "src(\.oct0)?" is declared more than once/.test(m),
+      ),
+    ).toBe(true);
   });
 
   it("accepts two distinct ref instantiations sharing a bare element/field id (§6 reuse)", () => {
@@ -1009,7 +1908,12 @@ describe("validatePacket — expanded-id collisions (§2/§11.1, D10)", () => {
         { kind: "ref", ref: "tlv", id: "first", name: "F" },
         { kind: "ref", ref: "tlv", id: "second", name: "S" },
       ],
-      defs: { tlv: { id: "tlv", fields: [{ id: "len", name: "Len", type: { kind: "int", bits: 8 } }] } },
+      defs: {
+        tlv: {
+          id: "tlv",
+          fields: [{ id: "len", name: "Len", type: { kind: "int", bits: 8 } }],
+        },
+      },
     });
     // first.len / second.len are distinct expanded ids → OK.
     expect(e).toEqual([]);
@@ -1021,7 +1925,9 @@ describe("validatePacket — expanded-id collisions (§2/§11.1, D10)", () => {
       body: [
         { id: "d", name: "D", type: { kind: "int", bits: 8 } },
         {
-          kind: "switch", id: "s", on: { kind: "ref", field: "d" },
+          kind: "switch",
+          id: "s",
+          on: { kind: "ref", field: "d" },
           cases: {
             "1": {
               id: "a",
@@ -1034,7 +1940,9 @@ describe("validatePacket — expanded-id collisions (§2/§11.1, D10)", () => {
         },
       ],
     });
-    expect(e.some((m) => /expanded id "x" is declared more than once/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /expanded id "x" is declared more than once/.test(m)),
+    ).toBe(true);
   });
 
   it("rejects an arm field colliding with an enclosing-scope field", () => {
@@ -1043,22 +1951,45 @@ describe("validatePacket — expanded-id collisions (§2/§11.1, D10)", () => {
       body: [
         { id: "x", name: "X", type: { kind: "int", bits: 8 } },
         {
-          kind: "switch", id: "s", on: { kind: "ref", field: "x" },
-          cases: { "1": { id: "a", fields: [{ id: "x", name: "X2", type: { kind: "int", bits: 8 } }] } },
+          kind: "switch",
+          id: "s",
+          on: { kind: "ref", field: "x" },
+          cases: {
+            "1": {
+              id: "a",
+              fields: [{ id: "x", name: "X2", type: { kind: "int", bits: 8 } }],
+            },
+          },
         },
       ],
     });
-    expect(e.some((m) => /expanded id "x" is declared more than once/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /expanded id "x" is declared more than once/.test(m)),
+    ).toBe(true);
   });
 
   it("does not flag two sibling repeats sharing an element field id (distinct namespaces)", () => {
     const e = msgs({
       name: "t",
       body: [
-        { kind: "repeat", id: "r1", count: { kind: "lit", value: 2 },
-          element: { id: "e1", fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }] } },
-        { kind: "repeat", id: "r2", count: { kind: "lit", value: 2 },
-          element: { id: "e2", fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }] } },
+        {
+          kind: "repeat",
+          id: "r1",
+          count: { kind: "lit", value: 2 },
+          element: {
+            id: "e1",
+            fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }],
+          },
+        },
+        {
+          kind: "repeat",
+          id: "r2",
+          count: { kind: "lit", value: 2 },
+          element: {
+            id: "e2",
+            fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }],
+          },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -1083,10 +2014,16 @@ describe("validatePacket — leaf ref existence (§2/§11.1, D11)", () => {
       name: "t",
       body: [
         { id: "length", name: "Length", type: { kind: "int", bits: 16 } },
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "ref", field: "lenght" } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "ref", field: "lenght" } },
+        },
       ],
     });
-    expect(e.some((m) => /ref target "lenght" is not declared anywhere/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /ref target "lenght" is not declared anywhere/.test(m)),
+    ).toBe(true);
   });
 
   it("accepts a correctly-spelled ref target", () => {
@@ -1094,7 +2031,11 @@ describe("validatePacket — leaf ref existence (§2/§11.1, D11)", () => {
       name: "t",
       body: [
         { id: "length", name: "Length", type: { kind: "int", bits: 16 } },
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "ref", field: "length" } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "ref", field: "length" } },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -1105,29 +2046,58 @@ describe("validatePacket — leaf ref existence (§2/§11.1, D11)", () => {
       name: "t",
       body: [
         { id: "length", name: "Length", type: { kind: "int", bits: 16 } },
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "ref", field: "length#0" } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "ref", field: "length#0" } },
+        },
       ],
     });
-    expect(e.some((m) => /'#'-qualified ids may not appear in expressions/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /'#'-qualified ids may not appear in expressions/.test(m)),
+    ).toBe(true);
   });
 
   it("detects a local-ref-expanded dotted typo but accepts the correct dotted id", () => {
-    const def = { addr: { id: "addr", fields: [{ id: "oct0", name: "Octet 0", type: { kind: "int" as const, bits: 8 } }] } };
+    const def = {
+      addr: {
+        id: "addr",
+        fields: [
+          {
+            id: "oct0",
+            name: "Octet 0",
+            type: { kind: "int" as const, bits: 8 },
+          },
+        ],
+      },
+    };
     const bad = msgs({
       name: "t",
       defs: def,
       body: [
         { kind: "ref", ref: "addr", id: "src", name: "Source" },
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "ref", field: "src.oktet0" } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "ref", field: "src.oktet0" } },
+        },
       ],
     });
-    expect(bad.some((m) => /ref target "src.oktet0" is not declared anywhere/.test(m))).toBe(true);
+    expect(
+      bad.some((m) =>
+        /ref target "src.oktet0" is not declared anywhere/.test(m),
+      ),
+    ).toBe(true);
     const ok = msgs({
       name: "t",
       defs: def,
       body: [
         { kind: "ref", ref: "addr", id: "src", name: "Source" },
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "ref", field: "src.oct0" } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "ref", field: "src.oct0" } },
+        },
       ],
     });
     expect(ok).toEqual([]);
@@ -1138,7 +2108,11 @@ describe("validatePacket — leaf ref existence (§2/§11.1, D11)", () => {
       name: "t",
       imports: [{ source: "common/addr.psdl", as: "addr" }],
       body: [
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "ref", field: "addr.ipv4.oct0" } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "ref", field: "addr.ipv4.oct0" } },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -1148,9 +2122,13 @@ describe("validatePacket — leaf ref existence (§2/§11.1, D11)", () => {
     const bad = msgs({
       name: "t",
       body: [{ id: "a", name: "A", type: { kind: "int", bits: 8 } }],
-      constraints: [{ lhs: { kind: "ref", field: "nope" }, rhs: { kind: "lit", value: 1 } }],
+      constraints: [
+        { lhs: { kind: "ref", field: "nope" }, rhs: { kind: "lit", value: 1 } },
+      ],
     });
-    expect(bad.some((m) => /ref target "nope" is not declared anywhere/.test(m))).toBe(true);
+    expect(
+      bad.some((m) => /ref target "nope" is not declared anywhere/.test(m)),
+    ).toBe(true);
     // A constraint may forward-reference any declared field (no document-order rule).
     const ok = msgs({
       name: "t",
@@ -1158,7 +2136,9 @@ describe("validatePacket — leaf ref existence (§2/§11.1, D11)", () => {
         { id: "a", name: "A", type: { kind: "int", bits: 8 } },
         { id: "b", name: "B", type: { kind: "int", bits: 8 } },
       ],
-      constraints: [{ lhs: { kind: "ref", field: "b" }, rhs: { kind: "ref", field: "a" } }],
+      constraints: [
+        { lhs: { kind: "ref", field: "b" }, rhs: { kind: "ref", field: "a" } },
+      ],
     });
     expect(ok).toEqual([]);
   });
@@ -1167,21 +2147,54 @@ describe("validatePacket — leaf ref existence (§2/§11.1, D11)", () => {
     const e = msgs({
       name: "radiotap",
       body: [
-        { id: "version", name: "Version", type: { kind: "int", bits: 8 }, const: 0 },
+        {
+          id: "version",
+          name: "Version",
+          type: { kind: "int", bits: 8 },
+          const: 0,
+        },
         { id: "pad", name: "Pad", type: { kind: "int", bits: 8 } },
-        { id: "length", name: "Length", type: { kind: "int", bits: 16 }, category: "length" },
+        {
+          id: "length",
+          name: "Length",
+          type: { kind: "int", bits: 16 },
+          category: "length",
+        },
         { id: "present0", name: "Present 0", type: { kind: "int", bits: 32 } },
         {
           kind: "optional",
-          when: { kind: "op", op: "&", a: { kind: "ref", field: "present0" }, b: { kind: "lit", value: 2147483648 } },
-          container: { id: "present1", name: "Present 1", type: { kind: "int", bits: 32 } },
+          when: {
+            kind: "op",
+            op: "&",
+            a: { kind: "ref", field: "present0" },
+            b: { kind: "lit", value: 2147483648 },
+          },
+          container: {
+            id: "present1",
+            name: "Present 1",
+            type: { kind: "int", bits: 32 },
+          },
         },
         {
           kind: "optional",
-          when: { kind: "op", op: "&", a: { kind: "ref", field: "present1" }, b: { kind: "lit", value: 2147483648 } },
-          container: { id: "present2", name: "Present 2", type: { kind: "int", bits: 32 } },
+          when: {
+            kind: "op",
+            op: "&",
+            a: { kind: "ref", field: "present1" },
+            b: { kind: "lit", value: 2147483648 },
+          },
+          container: {
+            id: "present2",
+            name: "Present 2",
+            type: { kind: "int", bits: 32 },
+          },
         },
-        { id: "fields", name: "Fields", type: { kind: "bytes", n: { kind: "remaining" } }, display: "hex" },
+        {
+          id: "fields",
+          name: "Fields",
+          type: { kind: "bytes", n: { kind: "remaining" } },
+          display: "hex",
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -1194,14 +2207,25 @@ describe("validatePacket — checksumParams width & integer precision (§8/§11.
       name: "t",
       body: [
         {
-          id: "crc", name: "CRC-64", type: { kind: "int", bits: 64 }, category: "checksum",
-          checksumAlgorithm: "crc64-ecma182", checksumCovers: ["data"],
+          id: "crc",
+          name: "CRC-64",
+          type: { kind: "int", bits: 64 },
+          category: "checksum",
+          checksumAlgorithm: "crc64-ecma182",
+          checksumCovers: ["data"],
           checksumParams: {
-            polynomial: "0xAD93D23594C935A9", initValue: "0xFFFFFFFFFFFFFFFF",
-            finalXOR: "0xFFFFFFFFFFFFFFFF", inputReflect: true, outputReflect: true,
+            polynomial: "0xAD93D23594C935A9",
+            initValue: "0xFFFFFFFFFFFFFFFF",
+            finalXOR: "0xFFFFFFFFFFFFFFFF",
+            inputReflect: true,
+            outputReflect: true,
           },
         },
-        { id: "data", name: "Data", type: { kind: "bytes", n: { kind: "lit", value: 8 } } },
+        {
+          id: "data",
+          name: "Data",
+          type: { kind: "bytes", n: { kind: "lit", value: 8 } },
+        },
       ],
     });
     expect(e).toEqual([]);
@@ -1209,63 +2233,97 @@ describe("validatePacket — checksumParams width & integer precision (§8/§11.
   it("accepts bare integers within 2^53-1 (back-compat)", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        id: "fcs", name: "FCS", type: { kind: "int", bits: 32 }, category: "checksum",
-        checksumAlgorithm: "crc32-custom",
-        checksumParams: { polynomial: 0x04c11db7, initValue: 0xffffffff },
-      }],
+      body: [
+        {
+          id: "fcs",
+          name: "FCS",
+          type: { kind: "int", bits: 32 },
+          category: "checksum",
+          checksumAlgorithm: "crc32-custom",
+          checksumParams: { polynomial: 0x04c11db7, initValue: 0xffffffff },
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
   it("rejects a bare integer above 2^53-1 (must be a hex string)", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        id: "crc", name: "CRC", type: { kind: "int", bits: 64 }, category: "checksum",
-        checksumParams: { polynomial: 0xad93d23594c935a9 },
-      }],
+      body: [
+        {
+          id: "crc",
+          name: "CRC",
+          type: { kind: "int", bits: 64 },
+          category: "checksum",
+          checksumParams: { polynomial: 0xad93d23594c935a9 },
+        },
+      ],
     });
-    expect(e.some((m) => /exceeds 2\^53−1 and must be written as a \^0x/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /exceeds 2\^53−1 and must be written as a \^0x/.test(m)),
+    ).toBe(true);
   });
   it("rejects a malformed hex-string param", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        id: "crc", name: "CRC", type: { kind: "int", bits: 32 }, category: "checksum",
-        checksumParams: { polynomial: "0xZZ" },
-      }],
+      body: [
+        {
+          id: "crc",
+          name: "CRC",
+          type: { kind: "int", bits: 32 },
+          category: "checksum",
+          checksumParams: { polynomial: "0xZZ" },
+        },
+      ],
     });
     expect(e.some((m) => /hex string .* must match \^0x/.test(m))).toBe(true);
   });
   it("rejects checksumParams on a bytes field without an explicit width", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        id: "crc", name: "CRC", type: { kind: "bytes", n: { kind: "lit", value: 4 } }, category: "checksum",
-        checksumParams: { polynomial: 0x04c11db7 },
-      }],
+      body: [
+        {
+          id: "crc",
+          name: "CRC",
+          type: { kind: "bytes", n: { kind: "lit", value: 4 } },
+          category: "checksum",
+          checksumParams: { polynomial: 0x04c11db7 },
+        },
+      ],
     });
     expect(e.some((m) => /requires an explicit width/.test(m))).toBe(true);
   });
   it("accepts checksumParams on a bytes field with an explicit width", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        id: "crc", name: "CRC", type: { kind: "bytes", n: { kind: "lit", value: 4 } }, category: "checksum",
-        checksumParams: { polynomial: 0x04c11db7, width: 32 },
-      }],
+      body: [
+        {
+          id: "crc",
+          name: "CRC",
+          type: { kind: "bytes", n: { kind: "lit", value: 4 } },
+          category: "checksum",
+          checksumParams: { polynomial: 0x04c11db7, width: 32 },
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
   it("rejects an out-of-range width", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        id: "crc", name: "CRC", type: { kind: "int", bits: 32 }, category: "checksum",
-        checksumParams: { polynomial: 0x04c11db7, width: 65 },
-      }],
+      body: [
+        {
+          id: "crc",
+          name: "CRC",
+          type: { kind: "int", bits: 32 },
+          category: "checksum",
+          checksumParams: { polynomial: 0x04c11db7, width: 65 },
+        },
+      ],
     });
-    expect(e.some((m) => /width must be an integer in 1–64/.test(m))).toBe(true);
+    expect(e.some((m) => /width must be an integer in 1–64/.test(m))).toBe(
+      true,
+    );
   });
 });
 
@@ -1275,10 +2333,25 @@ describe("validatePacket — headerProtected resolution (§5/§11.1, D6)", () =>
       name: "quic",
       body: [
         { id: "firstByte", name: "First Byte", type: { kind: "int", bits: 8 } },
-        { id: "packetNumber", name: "Packet Number", type: { kind: "bytes", n: { kind: "lit", value: 4 } } },
         {
-          kind: "encrypted", id: "payload", wireBits: { kind: "lit", value: 800 },
-          plaintext: { id: "frames", fields: [{ id: "data", name: "Data", type: { kind: "bytes", n: { kind: "remaining" } } }] },
+          id: "packetNumber",
+          name: "Packet Number",
+          type: { kind: "bytes", n: { kind: "lit", value: 4 } },
+        },
+        {
+          kind: "encrypted",
+          id: "payload",
+          wireBits: { kind: "lit", value: 800 },
+          plaintext: {
+            id: "frames",
+            fields: [
+              {
+                id: "data",
+                name: "Data",
+                type: { kind: "bytes", n: { kind: "remaining" } },
+              },
+            ],
+          },
           headerProtected: ["firstByte", "packetNumber"],
         },
       ],
@@ -1288,24 +2361,40 @@ describe("validatePacket — headerProtected resolution (§5/§11.1, D6)", () =>
   it("accepts a plaintext-internal id", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        kind: "encrypted", id: "enc", wireBits: { kind: "lit", value: 64 },
-        plaintext: { id: "pt", fields: [{ id: "hdr", name: "H", type: { kind: "int", bits: 8 } }] },
-        headerProtected: ["hdr"],
-      }],
+      body: [
+        {
+          kind: "encrypted",
+          id: "enc",
+          wireBits: { kind: "lit", value: 64 },
+          plaintext: {
+            id: "pt",
+            fields: [{ id: "hdr", name: "H", type: { kind: "int", bits: 8 } }],
+          },
+          headerProtected: ["hdr"],
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
   it("rejects a headerProtected id resolving to neither plaintext nor an earlier same-body field", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        kind: "encrypted", id: "enc", wireBits: { kind: "lit", value: 64 },
-        plaintext: { id: "pt", fields: [{ id: "hdr", name: "H", type: { kind: "int", bits: 8 } }] },
-        headerProtected: ["nope"],
-      }],
+      body: [
+        {
+          kind: "encrypted",
+          id: "enc",
+          wireBits: { kind: "lit", value: 64 },
+          plaintext: {
+            id: "pt",
+            fields: [{ id: "hdr", name: "H", type: { kind: "int", bits: 8 } }],
+          },
+          headerProtected: ["nope"],
+        },
+      ],
     });
-    expect(e.some((m) => /headerProtected id "nope" resolves to neither/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /headerProtected id "nope" resolves to neither/.test(m)),
+    ).toBe(true);
   });
 });
 
@@ -1313,37 +2402,78 @@ describe("validatePacket — bytes delimiter form (§3/§11.1, D3)", () => {
   it("accepts a CRLF-terminated bytes field", () => {
     const e = msgs({
       name: "http",
-      body: [{ id: "requestLine", name: "Request line", display: "ascii", type: { kind: "bytes", n: { delimiter: [13, 10] } } }],
+      body: [
+        {
+          id: "requestLine",
+          name: "Request line",
+          display: "ascii",
+          type: { kind: "bytes", n: { delimiter: [13, 10] } },
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
   it("accepts a NUL-terminated bytes field", () => {
     const e = msgs({
       name: "smb",
-      body: [{ id: "filename", name: "Filename", display: "ascii", type: { kind: "bytes", n: { delimiter: [0] } } }],
+      body: [
+        {
+          id: "filename",
+          name: "Filename",
+          display: "ascii",
+          type: { kind: "bytes", n: { delimiter: [0] } },
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
   it("rejects an empty delimiter array", () => {
     const e = msgs({
       name: "t",
-      body: [{ id: "x", name: "X", type: { kind: "bytes", n: { delimiter: [] } } }],
+      body: [
+        { id: "x", name: "X", type: { kind: "bytes", n: { delimiter: [] } } },
+      ],
     });
-    expect(e.some((m) => /delimiter must be a non-empty array/.test(m))).toBe(true);
+    expect(e.some((m) => /delimiter must be a non-empty array/.test(m))).toBe(
+      true,
+    );
   });
   it("rejects a delimiter byte outside 0-255", () => {
     const e = msgs({
       name: "t",
-      body: [{ id: "x", name: "X", type: { kind: "bytes", n: { delimiter: [256] } } }],
+      body: [
+        {
+          id: "x",
+          name: "X",
+          type: { kind: "bytes", n: { delimiter: [256] } },
+        },
+      ],
     });
-    expect(e.some((m) => /delimiter elements must be integers in 0–255/.test(m))).toBe(true);
+    expect(
+      e.some((m) => /delimiter elements must be integers in 0–255/.test(m)),
+    ).toBe(true);
   });
   it("rejects an unknown key on the delimiter form", () => {
     const e = msgs({
       name: "t",
-      body: [{ id: "x", name: "X", type: { kind: "bytes", n: { delimiter: [0], consume: true } as never } }],
+      body: [
+        {
+          id: "x",
+          name: "X",
+          type: {
+            kind: "bytes",
+            n: { delimiter: [0], consume: true } as never,
+          },
+        },
+      ],
     });
-    expect(e.some((m) => /delimiter form accepts only the "delimiter" key \(got "consume"\)/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /delimiter form accepts only the "delimiter" key \(got "consume"\)/.test(
+          m,
+        ),
+      ),
+    ).toBe(true);
   });
 });
 
@@ -1351,16 +2481,39 @@ describe("validatePacket — subfields (§12/§11.1, D4)", () => {
   const fcf = (extra: Record<string, unknown> = {}) => ({
     name: "ieee802154",
     byteOrder: "LE" as const,
-    body: [{
-      id: "fcf", name: "Frame Control", type: { kind: "int" as const, bits: 16 }, display: "hex" as const,
-      subfields: [
-        { id: "frameType", name: "Frame Type", mask: 0x0007, category: "type" as const,
-          values: [{ value: 1, label: "Data" }, { value: 2, label: "Ack" }] },
-        { id: "secEnabled", name: "Security Enabled", mask: 0x0008, category: "flags" as const },
-        { id: "srcAddrMode", name: "Src Addr Mode", mask: 0xc000, category: "type" as const },
-      ],
-      ...extra,
-    }],
+    body: [
+      {
+        id: "fcf",
+        name: "Frame Control",
+        type: { kind: "int" as const, bits: 16 },
+        display: "hex" as const,
+        subfields: [
+          {
+            id: "frameType",
+            name: "Frame Type",
+            mask: 0x0007,
+            category: "type" as const,
+            values: [
+              { value: 1, label: "Data" },
+              { value: 2, label: "Ack" },
+            ],
+          },
+          {
+            id: "secEnabled",
+            name: "Security Enabled",
+            mask: 0x0008,
+            category: "flags" as const,
+          },
+          {
+            id: "srcAddrMode",
+            name: "Src Addr Mode",
+            mask: 0xc000,
+            category: "type" as const,
+          },
+        ],
+        ...extra,
+      },
+    ],
   });
   it("accepts non-overlapping subfields over an LE 16-bit int", () => {
     expect(msgs(fcf())).toEqual([]);
@@ -1368,51 +2521,126 @@ describe("validatePacket — subfields (§12/§11.1, D4)", () => {
   it("rejects subfields on a non-int / non-byte-aligned-bits field", () => {
     const e = msgs({
       name: "t",
-      body: [{
-        id: "x", name: "X", type: { kind: "bytes", n: { kind: "lit", value: 2 } },
-        subfields: [{ id: "a", name: "A", mask: 1 }],
-      }],
+      body: [
+        {
+          id: "x",
+          name: "X",
+          type: { kind: "bytes", n: { kind: "lit", value: 2 } },
+          subfields: [{ id: "a", name: "A", mask: 1 }],
+        },
+      ],
     });
-    expect(e.some((m) => /subfields are only allowed on an int field or a byte-aligned bits field/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /subfields are only allowed on an int field or a byte-aligned bits field/.test(
+          m,
+        ),
+      ),
+    ).toBe(true);
   });
   it("accepts subfields on a byte-aligned bits field but rejects a non-byte-aligned one", () => {
     const ok = msgs({
       name: "t",
-      body: [{ id: "x", name: "X", type: { kind: "bits", n: 16 }, subfields: [{ id: "a", name: "A", mask: 0x00ff }] }],
+      body: [
+        {
+          id: "x",
+          name: "X",
+          type: { kind: "bits", n: 16 },
+          subfields: [{ id: "a", name: "A", mask: 0x00ff }],
+        },
+      ],
     });
     expect(ok).toEqual([]);
     const bad = msgs({
       name: "t",
-      body: [{ id: "x", name: "X", type: { kind: "bits", n: 12 }, subfields: [{ id: "a", name: "A", mask: 1 }] }],
+      body: [
+        {
+          id: "x",
+          name: "X",
+          type: { kind: "bits", n: 12 },
+          subfields: [{ id: "a", name: "A", mask: 1 }],
+        },
+      ],
     });
     expect(bad.some((m) => /byte-aligned bits field/.test(m))).toBe(true);
   });
   it("rejects a mask that does not fit the declared width", () => {
     const e = msgs({
       name: "t",
-      body: [{ id: "f", name: "F", type: { kind: "int", bits: 8 }, subfields: [{ id: "a", name: "A", mask: 0x100 }] }],
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 8 },
+          subfields: [{ id: "a", name: "A", mask: 0x100 }],
+        },
+      ],
     });
-    expect(e.some((m) => /does not fit within the field's declared 8-bit width/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /does not fit within the field's declared 8-bit width/.test(m),
+      ),
+    ).toBe(true);
   });
   it("accepts a >53-bit hex-string mask on a 64-bit field (BigInt precision)", () => {
     const e = msgs({
       name: "t",
-      body: [{ id: "f", name: "F", type: { kind: "int", bits: 64 }, subfields: [{ id: "hi", name: "Hi", mask: "0xFFFFFFFF00000000" }] }],
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 64 },
+          subfields: [{ id: "hi", name: "Hi", mask: "0xFFFFFFFF00000000" }],
+        },
+      ],
     });
     expect(e).toEqual([]);
   });
   it("rejects a >53-bit hex mask that overflows the declared width", () => {
     const e = msgs({
       name: "t",
-      body: [{ id: "f", name: "F", type: { kind: "int", bits: 32 }, subfields: [{ id: "hi", name: "Hi", mask: "0xFFFFFFFF00000000" }] }],
+      body: [
+        {
+          id: "f",
+          name: "F",
+          type: { kind: "int", bits: 32 },
+          subfields: [{ id: "hi", name: "Hi", mask: "0xFFFFFFFF00000000" }],
+        },
+      ],
     });
-    expect(e.some((m) => /does not fit within the field's declared 32-bit width/.test(m))).toBe(true);
+    expect(
+      e.some((m) =>
+        /does not fit within the field's declared 32-bit width/.test(m),
+      ),
+    ).toBe(true);
   });
   it("rejects a malformed mask and an unknown subfield key", () => {
-    expect(msgs({ name: "t", body: [{ id: "f", name: "F", type: { kind: "int", bits: 8 }, subfields: [{ id: "a", name: "A", mask: "ff" } as never] }] })
-      .some((m) => /mask must be a non-negative integer or a \^0x/.test(m))).toBe(true);
-    expect(msgs({ name: "t", body: [{ id: "f", name: "F", type: { kind: "int", bits: 8 }, subfields: [{ id: "a", name: "A", mask: 1, bogus: 1 } as never] }] })
-      .some((m) => /has unknown key "bogus"/.test(m))).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            id: "f",
+            name: "F",
+            type: { kind: "int", bits: 8 },
+            subfields: [{ id: "a", name: "A", mask: "ff" } as never],
+          },
+        ],
+      }).some((m) => /mask must be a non-negative integer or a \^0x/.test(m)),
+    ).toBe(true);
+    expect(
+      msgs({
+        name: "t",
+        body: [
+          {
+            id: "f",
+            name: "F",
+            type: { kind: "int", bits: 8 },
+            subfields: [{ id: "a", name: "A", mask: 1, bogus: 1 } as never],
+          },
+        ],
+      }).some((m) => /has unknown key "bogus"/.test(m)),
+    ).toBe(true);
   });
 });
 
@@ -1442,7 +2670,9 @@ describe("checksumCovers (§8/§11.1)", () => {
     // §8 treats checksumCovers as the canonical ordering of the checksum's
     // input stream, so a name that resolves to nothing is not a harmless typo.
     const errs = validatePacket(withCovers(["a", "nope"]));
-    expect(errs.some((e) => /checksumCovers "nope" is not declared/.test(e.message))).toBe(true);
+    expect(
+      errs.some((e) => /checksumCovers "nope" is not declared/.test(e.message)),
+    ).toBe(true);
   });
 
   it("rejects an import-qualified def name", () => {
@@ -1451,7 +2681,10 @@ describe("checksumCovers (§8/§11.1)", () => {
       rowBits: 32,
       imports: [{ from: "./addr.psdl.yaml", as: "addr" }],
       defs: {
-        ipv4Addr: { id: "ipv4Addr", fields: [{ id: "oct0", name: "O0", type: { kind: "int", bits: 8 } }] },
+        ipv4Addr: {
+          id: "ipv4Addr",
+          fields: [{ id: "oct0", name: "O0", type: { kind: "int", bits: 8 } }],
+        },
       },
       body: [
         { kind: "ref", ref: "ipv4Addr", id: "src", name: "Src" },
@@ -1468,7 +2701,9 @@ describe("checksumCovers (§8/§11.1)", () => {
       ],
     };
     const errs = validatePacket(pkt);
-    expect(errs.some((e) => /import-qualified def name/.test(e.message))).toBe(true);
+    expect(errs.some((e) => /import-qualified def name/.test(e.message))).toBe(
+      true,
+    );
   });
 });
 
@@ -1478,7 +2713,10 @@ describe("imports × defs namespace collision (§1.2/§6)", () => {
     rowBits: 32,
     imports: [{ source: "./addr.psdl.yaml", as: "addr" }],
     defs: {
-      [defsKey]: { id: defsKey, fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }] },
+      [defsKey]: {
+        id: defsKey,
+        fields: [{ id: "x", name: "X", type: { kind: "int", bits: 8 } }],
+      },
     },
     body: [{ kind: "ref", ref: defsKey, id: "inst", name: "Inst" }],
   });
@@ -1487,10 +2725,14 @@ describe("imports × defs namespace collision (§1.2/§6)", () => {
     // `addr.ipv4Addr` would be ambiguous: imported def, or a dotted reach into
     // the local def `addr`? Nothing in the grammar separates them.
     const errs = validatePacket(pkt("addr"));
-    expect(errs.some((e) => /collides with a local defs key/.test(e.message))).toBe(true);
+    expect(
+      errs.some((e) => /collides with a local defs key/.test(e.message)),
+    ).toBe(true);
   });
 
   it("accepts a prefix that does not collide", () => {
-    expect(validatePacket(pkt("other")).some((e) => /collides/.test(e.message))).toBe(false);
+    expect(
+      validatePacket(pkt("other")).some((e) => /collides/.test(e.message)),
+    ).toBe(false);
   });
 });

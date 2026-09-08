@@ -61,13 +61,18 @@ body:
     const r = parsePsdl(src);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    const rep = r.packet.body[0] as { count: unknown; element: { fields: { type: { n: unknown } }[] } };
+    const rep = r.packet.body[0] as {
+      count: unknown;
+      element: { fields: { type: { n: unknown } }[] };
+    };
     expect(rep.count).toBe("eos");
     expect(rep.element.fields[0]!.type.n).toEqual({ kind: "remaining" });
   });
 
   it("reports validation errors", () => {
-    const r = parsePsdl(`name: t\nbody:\n  - id: "1bad"\n    name: X\n    type: { kind: int, bits: 8 }`);
+    const r = parsePsdl(
+      `name: t\nbody:\n  - id: "1bad"\n    name: X\n    type: { kind: int, bits: 8 }`,
+    );
     expect(r.ok).toBe(false);
   });
 });
@@ -78,20 +83,34 @@ describe("stringifyPsdl — round-trip (export → re-parse)", () => {
       version: "0.5",
       name: "t",
       meta: { rfc: { defined: 791, updates: [2474, 3168] }, section: "1.4" },
-      body: [{
-        id: "dscp", name: "DSCP", type: { kind: "int", bits: 6 },
-        meta: { rfc: { defined: 2474, updates: [3260] } },
-        values: [
-          { value: 46, name: "EF", label: "Expedited Forwarding", level: "must" },
-          { range: [8, 15], name: "CS", level: "should" },
-          // Digit-only patterns MUST survive as strings: an unquoted `pattern: 11`
-          // would re-parse as the number 11 and fail validation.
-          { pattern: "11", name: "EXP2" },
-          { pattern: "0110", name: "EXP4", meta: { rfc: 2474 } },
-        ],
-      }],
+      body: [
+        {
+          id: "dscp",
+          name: "DSCP",
+          type: { kind: "int", bits: 6 },
+          meta: { rfc: { defined: 2474, updates: [3260] } },
+          values: [
+            {
+              value: 46,
+              name: "EF",
+              label: "Expedited Forwarding",
+              level: "must",
+            },
+            { range: [8, 15], name: "CS", level: "should" },
+            // Digit-only patterns MUST survive as strings: an unquoted `pattern: 11`
+            // would re-parse as the number 11 and fail validation.
+            { pattern: "11", name: "EXP2" },
+            { pattern: "0110", name: "EXP4", meta: { rfc: 2474 } },
+          ],
+        },
+      ],
       constraints: [
-        { lhs: { kind: "ref", field: "dscp" }, rhs: { kind: "lit", value: 46 }, level: "should", doc: "advisory" },
+        {
+          lhs: { kind: "ref", field: "dscp" },
+          rhs: { kind: "lit", value: 46 },
+          level: "should",
+          doc: "advisory",
+        },
       ],
     };
     const reparsed = parsePsdl(stringifyPsdl(original));
@@ -106,19 +125,36 @@ describe("stringifyPsdl — round-trip (export → re-parse)", () => {
       name: "t",
       body: [
         {
-          kind: "group", id: "g", name: "G",
+          kind: "group",
+          id: "g",
+          name: "G",
           meta: { rfc: { defined: 791, updates: [2474] }, section: "3.1" },
           children: [
             {
-              id: "proto", name: "Protocol",
+              id: "proto",
+              name: "Protocol",
               // Mixed string/object variants under numeric-string keys: the
               // object form's level/meta must survive export → re-parse.
-              type: { kind: "enum", bits: 8, variants: {
-                "6": { label: "TCP", doc: "Transmission Control", level: "may", meta: { rfc: 793 } },
-                "17": "UDP",
-              } },
+              type: {
+                kind: "enum",
+                bits: 8,
+                variants: {
+                  "6": {
+                    label: "TCP",
+                    doc: "Transmission Control",
+                    level: "may",
+                    meta: { rfc: 793 },
+                  },
+                  "17": "UDP",
+                },
+              },
               values: [
-                { value: 6, name: "TCP", doc: "assigned by IANA", level: "should" },
+                {
+                  value: 6,
+                  name: "TCP",
+                  doc: "assigned by IANA",
+                  level: "should",
+                },
               ],
             },
           ],

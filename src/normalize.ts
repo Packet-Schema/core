@@ -4,7 +4,15 @@
 // single-pass parse that injects context-dependent expression values
 // (remaining/enclosingBits/wireSize/prevIter) into the env as it goes.
 
-import { evalExpr, evalExprOr, exprContains, enclosingBitsEnvKey, prevIterEnvKey, remainingEnvKey, wireSizeEnvKey } from "./expr.js";
+import {
+  evalExpr,
+  evalExprOr,
+  exprContains,
+  enclosingBitsEnvKey,
+  prevIterEnvKey,
+  remainingEnvKey,
+  wireSizeEnvKey,
+} from "./expr.js";
 import { isField } from "./utils.js";
 import type {
   Bounded,
@@ -47,8 +55,13 @@ export function bytesDelimLenEnvKey(qid: string): string {
 
 /** True if a `bytes.n` is the delimiter form rather than an Expr (§3). */
 export function isBytesDelimited(n: unknown): n is BytesDelimited {
-  return typeof n === "object" && n !== null && !Array.isArray(n) && "delimiter" in n &&
-    Array.isArray((n as { delimiter?: unknown }).delimiter);
+  return (
+    typeof n === "object" &&
+    n !== null &&
+    !Array.isArray(n) &&
+    "delimiter" in n &&
+    Array.isArray((n as { delimiter?: unknown }).delimiter)
+  );
 }
 
 /** Internal bit-accumulator mirror of wireSizeEnvKey (§4 sub-byte rounding). */
@@ -143,7 +156,8 @@ function seedDefaults(
     } else if (c.kind === "repeat") {
       seedDefaults(c.element.fields, env, defs, depth, activeRecursive);
     } else if (c.kind === "switch") {
-      for (const arm of Object.values(c.cases)) seedDefaults(arm.fields, env, defs, depth, activeRecursive);
+      for (const arm of Object.values(c.cases))
+        seedDefaults(arm.fields, env, defs, depth, activeRecursive);
     } else if (c.kind === "ref") {
       const def = defs[c.ref];
       if (!def) continue;
@@ -151,7 +165,9 @@ function seedDefaults(
       // seeded) is an unresolved boundary — seed only the directly-declared
       // fields of the def body, not recursively-expanded instances.
       if (activeRecursive.has(c.ref)) continue;
-      const nextActive = def.recursive ? new Set([...activeRecursive, c.ref]) : activeRecursive;
+      const nextActive = def.recursive
+        ? new Set([...activeRecursive, c.ref])
+        : activeRecursive;
       seedDefaults(def.fields, env, defs, depth + 1, nextActive);
     }
     // virtual / align seed nothing
@@ -200,7 +216,10 @@ function injectScopeBudget(state: WalkState): ScopeFrame | undefined {
   let frame: ScopeFrame | undefined;
   for (let i = state.scopeStack.length - 1; i >= 0; i--) {
     const f = state.scopeStack[i]!;
-    if (f.budgetBits !== undefined) { frame = f; break; }
+    if (f.budgetBits !== undefined) {
+      frame = f;
+      break;
+    }
   }
   if (frame === undefined) {
     state.env.delete(remainingEnvKey());
@@ -214,7 +233,10 @@ function injectScopeBudget(state: WalkState): ScopeFrame | undefined {
   // floor(budget/8) - ceil(consumed/8) form, which double-penalised a partial
   // trailing budget byte against a mid-byte cursor and under-reported by one.
   const consumedBits = state.offset - frame.startOffset;
-  const remainingBytes = Math.max(0, Math.floor((frame.budgetBits! - consumedBits) / 8));
+  const remainingBytes = Math.max(
+    0,
+    Math.floor((frame.budgetBits! - consumedBits) / 8),
+  );
   state.env.set(remainingEnvKey(), remainingBytes);
   state.env.set(enclosingBitsEnvKey(), frame.budgetBits!);
   return frame;
@@ -230,9 +252,19 @@ function injectScopeBudget(state: WalkState): ScopeFrame | undefined {
  * injected. Distinguish that from "no scope provider at all" and raise, rather
  * than silently resolving to 0.
  */
-function guardScopeBudget(state: WalkState, frame: ScopeFrame | undefined, expr: Expr): void {
+function guardScopeBudget(
+  state: WalkState,
+  frame: ScopeFrame | undefined,
+  expr: Expr,
+): void {
   if (frame !== undefined) return;
-  if (!exprContains(expr, (e) => e.kind === "remaining" || e.kind === "enclosingBits")) return;
+  if (
+    !exprContains(
+      expr,
+      (e) => e.kind === "remaining" || e.kind === "enclosingBits",
+    )
+  )
+    return;
   throw new Error(
     "normalize: 'remaining'/'enclosingBits' used at the top-level body but the decoder did not inject the total packet size (pass totalBits) (§4/§11.2).",
   );
@@ -272,7 +304,9 @@ function evalIn(state: WalkState, expr: Expr): number {
 }
 
 function repeatSuffix(state: WalkState): string {
-  return state.repeatIndexStack.length > 0 ? `#${state.repeatIndexStack.join("_")}` : "";
+  return state.repeatIndexStack.length > 0
+    ? `#${state.repeatIndexStack.join("_")}`
+    : "";
 }
 
 /** Fully-qualified id for a container/field (prefix + id + repeat suffix). */
@@ -332,7 +366,10 @@ function applyWalkContext(state: WalkState, nf: NormalizedField): void {
     nf.repeatIndex = state.repeatIndexStack[state.repeatIndexStack.length - 1]!;
   if (state.groupStack.length > 0) {
     const top = state.groupStack[state.groupStack.length - 1]!;
-    const indexTag = state.repeatIndexStack.length > 0 ? state.repeatIndexStack.join("_") : null;
+    const indexTag =
+      state.repeatIndexStack.length > 0
+        ? state.repeatIndexStack.join("_")
+        : null;
     nf.groupId = indexTag !== null ? `${top.id}#${indexTag}` : top.id;
     nf.groupName = top.name;
     // §5.4: groupMeta is the meta of the NEAREST enclosing group that defines
@@ -341,7 +378,10 @@ function applyWalkContext(state: WalkState, nf: NormalizedField): void {
     // group carries meta.
     for (let i = state.groupStack.length - 1; i >= 0; i--) {
       const frame = state.groupStack[i]!;
-      if (frame.meta !== undefined) { nf.groupMeta = frame.meta; break; }
+      if (frame.meta !== undefined) {
+        nf.groupMeta = frame.meta;
+        break;
+      }
     }
   }
 }
@@ -354,7 +394,10 @@ function emit(state: WalkState, field: Field, path: string): void {
     const nExpr: Expr = field.type.n;
     // §4/§11.2: top-level `remaining`/`enclosingBits` with no injected total.
     guardScopeBudget(state, frame, nExpr);
-    if (state.offset % 8 !== 0 && exprContains(nExpr, (e) => e.kind === "remaining"))
+    if (
+      state.offset % 8 !== 0 &&
+      exprContains(nExpr, (e) => e.kind === "remaining")
+    )
       throw new Error(
         `normalize: 'remaining' sizes bytes field "${field.id}" while the cursor is mid-byte (offset ${state.offset} bits); insert an 'align' first (§11.2).`,
       );
@@ -367,9 +410,10 @@ function emit(state: WalkState, field: Field, path: string): void {
   // the general branch passed the bare `field.id`, so a `varint` / `berLength`
   // inside a `ref` or `repeat` never matched its injection and silently fell
   // back to the static default.
-  const bits = (field.type.kind === "bytes" && isBytesDelimited(field.type.n))
-    ? Math.max(0, Math.trunc(state.env.get(bytesDelimLenEnvKey(id)) ?? 0)) * 8
-    : typeBits(field.type, state.env, id);
+  const bits =
+    field.type.kind === "bytes" && isBytesDelimited(field.type.n)
+      ? Math.max(0, Math.trunc(state.env.get(bytesDelimLenEnvKey(id)) ?? 0)) * 8
+      : typeBits(field.type, state.env, id);
   const nf: NormalizedField = {
     id,
     name: field.name,
@@ -386,10 +430,18 @@ function emit(state: WalkState, field: Field, path: string): void {
     ...(field.subfields !== undefined ? { subfields: field.subfields } : {}),
     // §8: checksum binding rides through so codegen/LSP can read the algorithm,
     // covered fields, pseudo-header, and CRC parameters (width included).
-    ...(field.checksumAlgorithm !== undefined ? { checksumAlgorithm: field.checksumAlgorithm } : {}),
-    ...(field.checksumCovers !== undefined ? { checksumCovers: field.checksumCovers } : {}),
-    ...(field.checksumPseudoHeader !== undefined ? { checksumPseudoHeader: field.checksumPseudoHeader } : {}),
-    ...(field.checksumParams !== undefined ? { checksumParams: field.checksumParams } : {}),
+    ...(field.checksumAlgorithm !== undefined
+      ? { checksumAlgorithm: field.checksumAlgorithm }
+      : {}),
+    ...(field.checksumCovers !== undefined
+      ? { checksumCovers: field.checksumCovers }
+      : {}),
+    ...(field.checksumPseudoHeader !== undefined
+      ? { checksumPseudoHeader: field.checksumPseudoHeader }
+      : {}),
+    ...(field.checksumParams !== undefined
+      ? { checksumParams: field.checksumParams }
+      : {}),
   };
   applyWalkContext(state, nf);
   if (state.encryptedStack.length > 0) {
@@ -397,33 +449,62 @@ function emit(state: WalkState, field: Field, path: string): void {
     nf.encryptedParentId = top.parentId;
     nf.encryptedContextNote = top.contextNote;
     for (const frame of state.encryptedStack) {
-      if (frame.headerProtected.has(field.id)) { nf.headerProtected = true; break; }
+      if (frame.headerProtected.has(field.id)) {
+        nf.headerProtected = true;
+        break;
+      }
     }
   }
   if (field.byteOrder) nf.byteOrder = field.byteOrder;
   state.out.push(nf);
-  state.env.set(id, state.env.get(id) ?? state.env.get(field.id) ?? field.const ?? field.defaultValue ?? 0);
+  state.env.set(
+    id,
+    state.env.get(id) ??
+      state.env.get(field.id) ??
+      field.const ??
+      field.defaultValue ??
+      0,
+  );
   state.offset += bits;
   // Record wire footprint for wireSize (parse-direction; §4). Tracked in bits.
   recordWireSize(state, field.id, bits);
 }
 
 function walkContainer(c: Container, path: string, state: WalkState): void {
-  if (isField(c)) { emit(state, c, path); return; }
+  if (isField(c)) {
+    emit(state, c, path);
+    return;
+  }
   switch (c.kind) {
-    case "group": walkGroup(c, path, state); return;
-    case "repeat": walkRepeat(c, path, state); return;
-    case "switch": walkSwitch(c, path, state); return;
-    case "encrypted": walkEncrypted(c, path, state); return;
-    case "bounded": walkBounded(c, path, state); return;
-    case "align": walkAlign(c, state); return;
-    case "virtual": walkVirtual(c, path, state); return;
+    case "group":
+      walkGroup(c, path, state);
+      return;
+    case "repeat":
+      walkRepeat(c, path, state);
+      return;
+    case "switch":
+      walkSwitch(c, path, state);
+      return;
+    case "encrypted":
+      walkEncrypted(c, path, state);
+      return;
+    case "bounded":
+      walkBounded(c, path, state);
+      return;
+    case "align":
+      walkAlign(c, state);
+      return;
+    case "virtual":
+      walkVirtual(c, path, state);
+      return;
     case "optional": {
       const test = evalIn(state, c.when);
       if (test !== 0) walkContainer(c.container, path, state);
       return;
     }
-    case "ref": walkRef(c, path, state); return;
+    case "ref":
+      walkRef(c, path, state);
+      return;
   }
 }
 
@@ -505,7 +586,14 @@ function walkRef(r: RefContainer, path: string, state: WalkState): void {
 function walkGroup(g: Group, path: string, state: WalkState): void {
   const sub = `${path}/${g.id}`;
   const prev = state.groupStack;
-  state.groupStack = [...prev, { id: g.id, name: g.name ?? g.id, ...(g.meta !== undefined ? { meta: g.meta } : {}) }];
+  state.groupStack = [
+    ...prev,
+    {
+      id: g.id,
+      name: g.name ?? g.id,
+      ...(g.meta !== undefined ? { meta: g.meta } : {}),
+    },
+  ];
   const startOffset = state.offset;
   for (const child of g.children) walkContainer(child, sub, state);
   recordWireSize(state, g.id, state.offset - startOffset);
@@ -550,7 +638,10 @@ function walkRepeat(r: Repeat, path: string, state: WalkState): void {
   // values into sibling/enclosing containers (§4, §10.4).
   const savedPrevIter = new Map<string, number | undefined>();
   for (const child of elementFields)
-    savedPrevIter.set(prevIterEnvKey(child.id), state.env.get(prevIterEnvKey(child.id)));
+    savedPrevIter.set(
+      prevIterEnvKey(child.id),
+      state.env.get(prevIterEnvKey(child.id)),
+    );
 
   // Reset per-target wireSize accumulators so a fresh aggregate is built (§4).
   // Clear ALL container ids reachable in the element — not just the direct
@@ -584,7 +675,8 @@ function walkRepeat(r: Repeat, path: string, state: WalkState): void {
         if (v !== undefined) state.env.set(prevIterEnvKey(child.id), v);
       }
     }
-    for (const child of r.element.fields) walkContainer(child, innerPath, state);
+    for (const child of r.element.fields)
+      walkContainer(child, innerPath, state);
   }
   state.repeatIndexStack = prevStack;
 
@@ -631,22 +723,53 @@ function collectElementFields(
 ): ElementFieldRef[] {
   for (const c of fields) {
     if (isField(c)) {
-      out.push({ id: c.id, prefixPath, ...(c.const !== undefined ? { const: c.const } : {}), ...(c.defaultValue !== undefined ? { defaultValue: c.defaultValue } : {}) });
+      out.push({
+        id: c.id,
+        prefixPath,
+        ...(c.const !== undefined ? { const: c.const } : {}),
+        ...(c.defaultValue !== undefined
+          ? { defaultValue: c.defaultValue }
+          : {}),
+      });
       continue;
     }
     switch (c.kind) {
-      case "group": collectElementFields(c.children, defs, prefixPath, out, seenRefs); break;
-      case "bounded": collectElementFields(c.fields, defs, prefixPath, out, seenRefs); break;
-      case "optional": collectElementFields([c.container], defs, prefixPath, out, seenRefs); break;
-      case "repeat": /* inner repeat fields belong to that repeat's iterations */ break;
-      case "encrypted": collectElementFields(c.plaintext.fields, defs, prefixPath, out, seenRefs); break;
-      case "switch": for (const arm of Object.values(c.cases)) collectElementFields(arm.fields, defs, prefixPath, out, seenRefs); break;
+      case "group":
+        collectElementFields(c.children, defs, prefixPath, out, seenRefs);
+        break;
+      case "bounded":
+        collectElementFields(c.fields, defs, prefixPath, out, seenRefs);
+        break;
+      case "optional":
+        collectElementFields([c.container], defs, prefixPath, out, seenRefs);
+        break;
+      case "repeat":
+        /* inner repeat fields belong to that repeat's iterations */ break;
+      case "encrypted":
+        collectElementFields(
+          c.plaintext.fields,
+          defs,
+          prefixPath,
+          out,
+          seenRefs,
+        );
+        break;
+      case "switch":
+        for (const arm of Object.values(c.cases))
+          collectElementFields(arm.fields, defs, prefixPath, out, seenRefs);
+        break;
       case "ref": {
         if (seenRefs.has(c.ref)) break; // guard against recursive defs
         const def = defs[c.ref];
         if (!def) break;
         const nextPrefix = prefixPath ? `${prefixPath}.${c.id}` : c.id;
-        collectElementFields(def.fields, defs, nextPrefix, out, new Set([...seenRefs, c.ref]));
+        collectElementFields(
+          def.fields,
+          defs,
+          nextPrefix,
+          out,
+          new Set([...seenRefs, c.ref]),
+        );
         break;
       }
       // align/virtual contribute no prevIter source
@@ -655,17 +778,43 @@ function collectElementFields(
   return out;
 }
 
-function collectAggregateIds(fields: Container[], out: string[] = []): string[] {
+function collectAggregateIds(
+  fields: Container[],
+  out: string[] = [],
+): string[] {
   for (const c of fields) {
-    if (isField(c)) { out.push(c.id); continue; }
+    if (isField(c)) {
+      out.push(c.id);
+      continue;
+    }
     switch (c.kind) {
-      case "group": out.push(c.id); collectAggregateIds(c.children, out); break;
-      case "bounded": out.push(c.id); collectAggregateIds(c.fields, out); break;
-      case "switch": out.push(c.id); for (const arm of Object.values(c.cases)) collectAggregateIds(arm.fields, out); break;
-      case "repeat": out.push(c.id); collectAggregateIds(c.element.fields, out); break;
-      case "encrypted": out.push(c.id); collectAggregateIds(c.plaintext.fields, out); break;
-      case "ref": out.push(c.id); break;
-      case "optional": collectAggregateIds([c.container], out); break;
+      case "group":
+        out.push(c.id);
+        collectAggregateIds(c.children, out);
+        break;
+      case "bounded":
+        out.push(c.id);
+        collectAggregateIds(c.fields, out);
+        break;
+      case "switch":
+        out.push(c.id);
+        for (const arm of Object.values(c.cases))
+          collectAggregateIds(arm.fields, out);
+        break;
+      case "repeat":
+        out.push(c.id);
+        collectAggregateIds(c.element.fields, out);
+        break;
+      case "encrypted":
+        out.push(c.id);
+        collectAggregateIds(c.plaintext.fields, out);
+        break;
+      case "ref":
+        out.push(c.id);
+        break;
+      case "optional":
+        collectAggregateIds([c.container], out);
+        break;
       // align/virtual record no wireSize footprint
     }
   }
@@ -744,7 +893,9 @@ export function selectArm(
       // A reversed range (lo > hi) matches nothing and is rejected by the
       // validator (§5); guard here so it never silently masks the `_` arm.
       if (lo > hi)
-        throw new Error(`selectArm: invalid reversed range key "${key}" (lo > hi).`);
+        throw new Error(
+          `selectArm: invalid reversed range key "${key}" (lo > hi).`,
+        );
       if (disc >= lo && disc <= hi) return { key, struct };
     }
   }
@@ -768,7 +919,10 @@ function tagExternalHeaderProtected(e: Encrypted, state: WalkState): void {
   for (const hp of e.headerProtected) {
     if (plaintextIds.has(hp)) continue; // plaintext-internal: handled in emit()
     for (const nf of state.out) {
-      if (nf.id === hp) { nf.headerProtected = true; break; }
+      if (nf.id === hp) {
+        nf.headerProtected = true;
+        break;
+      }
     }
   }
 }
@@ -777,9 +931,10 @@ function walkEncrypted(e: Encrypted, path: string, state: WalkState): void {
   const sub = `${path}/${e.id}`;
   tagExternalHeaderProtected(e, state);
   if (state.viewMode === "wire") {
-    const bits = e.wireBits !== undefined
-      ? Math.max(0, Math.trunc(evalIn(state, e.wireBits)))
-      : sumPlaintextBits(e, state);
+    const bits =
+      e.wireBits !== undefined
+        ? Math.max(0, Math.trunc(evalIn(state, e.wireBits)))
+        : sumPlaintextBits(e, state);
     const nf: NormalizedField = {
       // Same qualification as emit(): ref prefix + repeat suffix, so repeat
       // iterations / sibling ref expansions never collide on the blob id (§5).
@@ -794,12 +949,15 @@ function walkEncrypted(e: Encrypted, path: string, state: WalkState): void {
       // blob, same as field.meta in emit().
       ...(e.meta !== undefined ? { meta: e.meta } : {}),
       encrypted: true,
-      ...(e.contextNote !== undefined ? { encryptedContextNote: e.contextNote } : {}),
+      ...(e.contextNote !== undefined
+        ? { encryptedContextNote: e.contextNote }
+        : {}),
     };
     // Switch-arm / repeat / group attribution, identical to emit() (§5, §5.4).
     applyWalkContext(state, nf);
     if (state.encryptedStack.length > 0)
-      nf.encryptedParentId = state.encryptedStack[state.encryptedStack.length - 1]!.parentId;
+      nf.encryptedParentId =
+        state.encryptedStack[state.encryptedStack.length - 1]!.parentId;
     state.out.push(nf);
     state.offset += bits;
     // §4: record the encrypted container's wire footprint so a later
@@ -807,9 +965,10 @@ function walkEncrypted(e: Encrypted, path: string, state: WalkState): void {
     recordWireSize(state, e.id, bits);
     return;
   }
-  const budgetBits = e.wireBits !== undefined
-    ? Math.max(0, Math.trunc(evalIn(state, e.wireBits)))
-    : undefined;
+  const budgetBits =
+    e.wireBits !== undefined
+      ? Math.max(0, Math.trunc(evalIn(state, e.wireBits)))
+      : undefined;
   const startOffset = state.offset;
   const frame: EncryptedFrame = {
     parentId: e.id,
@@ -817,7 +976,11 @@ function walkEncrypted(e: Encrypted, path: string, state: WalkState): void {
     headerProtected: new Set(e.headerProtected ?? []),
   };
   state.encryptedStack.push(frame);
-  state.scopeStack.push({ startOffset, kind: "encrypted", ...(budgetBits !== undefined ? { budgetBits } : {}) });
+  state.scopeStack.push({
+    startOffset,
+    kind: "encrypted",
+    ...(budgetBits !== undefined ? { budgetBits } : {}),
+  });
   try {
     for (const child of e.plaintext.fields) walkContainer(child, sub, state);
   } finally {
@@ -848,11 +1011,20 @@ function sumPlaintextBits(e: Encrypted, parent: WalkState): number {
   // parent env, where a later sibling could read the polluted footprint.
   const tmpEnv: PacketEnv = new Map(parent.env);
   const tmp: WalkState = {
-    out: [], env: tmpEnv, offset: 0, viewMode: "wire", defs: parent.defs,
-    encryptedStack: [], scopeStack: [], groupStack: [], repeatIndexStack: [],
-    idPrefix: "", refDepth: parent.refDepth,
+    out: [],
+    env: tmpEnv,
+    offset: 0,
+    viewMode: "wire",
+    defs: parent.defs,
+    encryptedStack: [],
+    scopeStack: [],
+    groupStack: [],
+    repeatIndexStack: [],
+    idPrefix: "",
+    refDepth: parent.refDepth,
   };
-  for (const child of e.plaintext.fields) walkContainer(child, e.plaintext.id, tmp);
+  for (const child of e.plaintext.fields)
+    walkContainer(child, e.plaintext.id, tmp);
   return tmp.offset;
 }
 
@@ -881,7 +1053,13 @@ export function normalize(
     viewMode: opts.viewMode ?? "wire",
     defs,
     encryptedStack: [],
-    scopeStack: [{ startOffset: 0, kind: "top", ...(opts.totalBits !== undefined ? { budgetBits: opts.totalBits } : {}) }],
+    scopeStack: [
+      {
+        startOffset: 0,
+        kind: "top",
+        ...(opts.totalBits !== undefined ? { budgetBits: opts.totalBits } : {}),
+      },
+    ],
     groupStack: [],
     repeatIndexStack: [],
     idPrefix: "",

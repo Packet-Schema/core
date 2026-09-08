@@ -22,30 +22,54 @@ import type {
 // reverse-looked-up exactly as an LSP/renderer would.
 const ipv4Tos: Packet = {
   name: "ipv4-tos",
-  body: [{
-    kind: "group", id: "tos", name: "Differentiated Services",
-    meta: { rfc: { defined: 791, updates: [2474, 3168] }, section: "1.4" },
-    children: [
-      {
-        id: "dscp", name: "DSCP", type: { kind: "int", bits: 6 },
-        meta: { rfc: { defined: 2474, updates: [3260, 8622] }, section: "3" },
-        values: [
-          { value: 0, name: "CS0", label: "Default / Best Effort", level: "should" },
-          { value: 46, name: "EF", label: "Expedited Forwarding", meta: { rfc: 3246 } },
-          { range: [8, 8], name: "CS1", meta: { rfc: 2474 } },
-          { pattern: "xxxx11", name: "EXP", label: "Experimental / Local Use", level: "may", meta: { rfc: 2474, section: "6" } },
-        ],
-      },
-      {
-        id: "ecn", name: "ECN", type: { kind: "int", bits: 2 },
-        meta: { rfc: { defined: 3168 } },
-        values: [
-          { value: 0, name: "Not-ECT" },
-          { value: 3, name: "CE", level: "must" },
-        ],
-      },
-    ],
-  }],
+  body: [
+    {
+      kind: "group",
+      id: "tos",
+      name: "Differentiated Services",
+      meta: { rfc: { defined: 791, updates: [2474, 3168] }, section: "1.4" },
+      children: [
+        {
+          id: "dscp",
+          name: "DSCP",
+          type: { kind: "int", bits: 6 },
+          meta: { rfc: { defined: 2474, updates: [3260, 8622] }, section: "3" },
+          values: [
+            {
+              value: 0,
+              name: "CS0",
+              label: "Default / Best Effort",
+              level: "should",
+            },
+            {
+              value: 46,
+              name: "EF",
+              label: "Expedited Forwarding",
+              meta: { rfc: 3246 },
+            },
+            { range: [8, 8], name: "CS1", meta: { rfc: 2474 } },
+            {
+              pattern: "xxxx11",
+              name: "EXP",
+              label: "Experimental / Local Use",
+              level: "may",
+              meta: { rfc: 2474, section: "6" },
+            },
+          ],
+        },
+        {
+          id: "ecn",
+          name: "ECN",
+          type: { kind: "int", bits: 2 },
+          meta: { rfc: { defined: 3168 } },
+          values: [
+            { value: 0, name: "Not-ECT" },
+            { value: 3, name: "CE", level: "must" },
+          ],
+        },
+      ],
+    },
+  ],
 };
 
 describe("integration — IPv4 ToS (DSCP+ECN) value dictionary (§5.3/§5.4)", () => {
@@ -57,17 +81,20 @@ describe("integration — IPv4 ToS (DSCP+ECN) value dictionary (§5.3/§5.4)", (
     const fs = normalize(ipv4Tos).fields;
     const dscp = fs.find((f) => f.id === "dscp")!;
     expect(dscp.values?.length).toBe(4);
-    expect(dscp.groupMeta).toEqual({ rfc: { defined: 791, updates: [2474, 3168] }, section: "1.4" });
+    expect(dscp.groupMeta).toEqual({
+      rfc: { defined: 791, updates: [2474, 3168] },
+      section: "1.4",
+    });
   });
 
   it("reverse-looks-up observed DSCP values like an LSP would", () => {
     const dscp = normalize(ipv4Tos).fields.find((f) => f.id === "dscp")!;
     const v = dscp.values!;
-    expect(resolveValueEntry(v, 46)?.name).toBe("EF");        // exact
-    expect(resolveValueEntry(v, 8)?.name).toBe("CS1");        // range
-    expect(resolveValueEntry(v, 43)?.name).toBe("EXP");       // 0b101011 → pattern xxxx11
-    expect(resolveValueEntry(v, 0)?.name).toBe("CS0");        // exact wins over pattern
-    expect(resolveValueEntry(v, 10)).toBeUndefined();         // out-of-list, still valid
+    expect(resolveValueEntry(v, 46)?.name).toBe("EF"); // exact
+    expect(resolveValueEntry(v, 8)?.name).toBe("CS1"); // range
+    expect(resolveValueEntry(v, 43)?.name).toBe("EXP"); // 0b101011 → pattern xxxx11
+    expect(resolveValueEntry(v, 0)?.name).toBe("CS0"); // exact wins over pattern
+    expect(resolveValueEntry(v, 10)).toBeUndefined(); // out-of-list, still valid
     // normative strength reaches the tool for badge rendering
     expect(resolveValueEntry(v, 43)?.level).toBe("may");
   });
@@ -136,11 +163,20 @@ describe("integration — public API surface (src/index.ts re-exports)", () => {
     expect(resolveValueEntry([entry], 46)).toBe(entry);
     expect(matchesPattern("xxxx11", 7)).toBe(true);
     const r = validateConstraints(
-      [{ lhs: { kind: "lit", value: 0 }, rhs: { kind: "lit", value: 1 }, level: "should" }],
+      [
+        {
+          lhs: { kind: "lit", value: 0 },
+          rhs: { kind: "lit", value: 1 },
+          level: "should",
+        },
+      ],
       new Map(),
     );
     expect("ok" in r).toBe(true);
-    const diags: ConstraintDiagnostic[] = "ok" in r ? r.diagnostics ?? [] : [];
-    expect(diags).toEqual([{ index: 0, level: "should", message: "Constraint failed: lhs=0 rhs=1" }]);
+    const diags: ConstraintDiagnostic[] =
+      "ok" in r ? (r.diagnostics ?? []) : [];
+    expect(diags).toEqual([
+      { index: 0, level: "should", message: "Constraint failed: lhs=0 rhs=1" },
+    ]);
   });
 });

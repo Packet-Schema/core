@@ -58,7 +58,11 @@ export function resolveLayout(
         // Field meta wins; fall back to the enclosing group's meta so a
         // single-child group (not collapsed into a parent) still surfaces its
         // RFC provenance for per-group deep-linking (§5.4).
-        ...(nf.meta ? { meta: nf.meta } : nf.groupMeta ? { meta: nf.groupMeta } : {}),
+        ...(nf.meta
+          ? { meta: nf.meta }
+          : nf.groupMeta
+            ? { meta: nf.groupMeta }
+            : {}),
       };
       bitPos = emitField(field, nf, bitPos, rowBits, cells);
       continue;
@@ -90,7 +94,9 @@ export function resolveLayout(
     const allEncrypted = g.children.every((c) => c.encrypted);
     const sharedParentId =
       g.children[0]?.encryptedParentId &&
-      g.children.every((c) => c.encryptedParentId === g.children[0]?.encryptedParentId)
+      g.children.every(
+        (c) => c.encryptedParentId === g.children[0]?.encryptedParentId,
+      )
         ? g.children[0].encryptedParentId
         : undefined;
     const allHeaderProtected = g.children.every((c) => c.headerProtected);
@@ -106,8 +112,12 @@ export function resolveLayout(
       name: g.parentName,
       bits: totalBits,
       ...(allEncrypted ? { encrypted: true as const } : {}),
-      ...(sharedParentId !== undefined ? { encryptedParentId: sharedParentId } : {}),
-      ...(sharedParentId ? { encryptedContextNote: first.encryptedContextNote } : {}),
+      ...(sharedParentId !== undefined
+        ? { encryptedParentId: sharedParentId }
+        : {}),
+      ...(sharedParentId
+        ? { encryptedContextNote: first.encryptedContextNote }
+        : {}),
       ...(allHeaderProtected ? { headerProtected: true as const } : {}),
       ...(sharedByteOrder !== undefined ? { byteOrder: sharedByteOrder } : {}),
     };
@@ -118,14 +128,23 @@ export function resolveLayout(
 
 type GroupedRun =
   | { kind: "flat"; field: NormalizedField }
-  | { kind: "collapsed"; parentId: string; parentName: string; children: NormalizedField[] };
+  | {
+      kind: "collapsed";
+      parentId: string;
+      parentName: string;
+      children: NormalizedField[];
+    };
 
 function groupConsecutiveByContainer(fields: NormalizedField[]): GroupedRun[] {
   const out: GroupedRun[] = [];
   let i = 0;
   while (i < fields.length) {
     const f = fields[i]!;
-    if (!f.groupId) { out.push({ kind: "flat", field: f }); i++; continue; }
+    if (!f.groupId) {
+      out.push({ kind: "flat", field: f });
+      i++;
+      continue;
+    }
     const groupId = f.groupId;
     const groupPath = f.originalContainerPath;
     const run: NormalizedField[] = [f];
@@ -148,7 +167,12 @@ function groupConsecutiveByContainer(fields: NormalizedField[]): GroupedRun[] {
       i = j;
       continue;
     }
-    out.push({ kind: "collapsed", parentId: groupId, parentName: f.groupName ?? groupId, children: real });
+    out.push({
+      kind: "collapsed",
+      parentId: groupId,
+      parentName: f.groupName ?? groupId,
+      children: real,
+    });
     i = j;
   }
   return out;
@@ -185,12 +209,21 @@ function emitField(
       fieldEndOffset: bits - remaining + take - 1,
     };
     if (nf.encrypted) cell.encrypted = true;
-    if (nf.encryptedParentId !== undefined) cell.encryptedParentId = nf.encryptedParentId;
-    if (nf.encryptedContextNote !== undefined) cell.encryptedContextNote = nf.encryptedContextNote;
+    if (nf.encryptedParentId !== undefined)
+      cell.encryptedParentId = nf.encryptedParentId;
+    if (nf.encryptedContextNote !== undefined)
+      cell.encryptedContextNote = nf.encryptedContextNote;
     if (nf.headerProtected) cell.headerProtected = true;
     if (nf.byteOrder) cell.byteOrder = nf.byteOrder;
     if (field.subfields && field.subfields.length > 0) {
-      cell.subCells = buildSubCells(field, field.subfields, cell.fieldStartOffset, cell.fieldEndOffset, colInRow, childNFs);
+      cell.subCells = buildSubCells(
+        field,
+        field.subfields,
+        cell.fieldStartOffset,
+        cell.fieldEndOffset,
+        colInRow,
+        childNFs,
+      );
     }
     cells.push(cell);
     remaining -= take;
@@ -231,8 +264,10 @@ function buildSubCells(
       bitsTotal: sf.bits,
     };
     if (childNF?.encrypted) sub.encrypted = true;
-    if (childNF?.encryptedParentId !== undefined) sub.encryptedParentId = childNF.encryptedParentId;
-    if (childNF?.encryptedContextNote !== undefined) sub.encryptedContextNote = childNF.encryptedContextNote;
+    if (childNF?.encryptedParentId !== undefined)
+      sub.encryptedParentId = childNF.encryptedParentId;
+    if (childNF?.encryptedContextNote !== undefined)
+      sub.encryptedContextNote = childNF.encryptedContextNote;
     if (childNF?.headerProtected) sub.headerProtected = true;
     if (childNF?.byteOrder) sub.byteOrder = childNF.byteOrder;
     out.push(sub);
@@ -240,7 +275,11 @@ function buildSubCells(
   return out;
 }
 
-function computeSegmentCount(startPos: number, bits: number, rowBits: number): number {
+function computeSegmentCount(
+  startPos: number,
+  bits: number,
+  rowBits: number,
+): number {
   let remaining = bits;
   let pos = startPos;
   let count = 0;

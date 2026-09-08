@@ -6,28 +6,53 @@ import type { BinOp, Expr, ExprWireSize, PacketEnv } from "./types.js";
 
 export const lit = (value: number): Expr => ({ kind: "lit", value });
 export const ref = (field: string): Expr => ({ kind: "ref", field });
-export const op = (o: BinOp, a: Expr, b: Expr): Expr => ({ kind: "op", op: o, a, b });
-export const cond = (test: Expr, t: Expr, f: Expr): Expr => ({ kind: "cond", test, t, f });
+export const op = (o: BinOp, a: Expr, b: Expr): Expr => ({
+  kind: "op",
+  op: o,
+  a,
+  b,
+});
+export const cond = (test: Expr, t: Expr, f: Expr): Expr => ({
+  kind: "cond",
+  test,
+  t,
+  f,
+});
 export const peek = (bits: number, offset?: Expr): Expr =>
-  offset === undefined ? { kind: "peek", bits } : { kind: "peek", bits, offset };
-export const lookup = (key: Expr, table: Record<number, number>): Expr => ({ kind: "lookup", key, table });
-export const wireSize = (target: string): ExprWireSize => ({ kind: "wireSize", target });
+  offset === undefined
+    ? { kind: "peek", bits }
+    : { kind: "peek", bits, offset };
+export const lookup = (key: Expr, table: Record<number, number>): Expr => ({
+  kind: "lookup",
+  key,
+  table,
+});
+export const wireSize = (target: string): ExprWireSize => ({
+  kind: "wireSize",
+  target,
+});
 export const prevIter = (field: string): Expr => ({ kind: "prevIter", field });
 export const remaining = (): Expr => ({ kind: "remaining" });
 export const enclosingBits = (): Expr => ({ kind: "enclosingBits" });
-export const enclosingField = (field: string): Expr => ({ kind: "enclosingField", field });
+export const enclosingField = (field: string): Expr => ({
+  kind: "enclosingField",
+  field,
+});
 
 /* ------------------------------------------------------------------ *
  * Reserved env keys for context-dependent expressions.
  * normalize injects these so evalExpr stays pure (§4, §10).
  * ------------------------------------------------------------------ */
 
-export const peekEnvKey = (offset: number, bits: number): string => `__peek__${offset}__${bits}`;
+export const peekEnvKey = (offset: number, bits: number): string =>
+  `__peek__${offset}__${bits}`;
 export const remainingEnvKey = (): string => "__remaining__";
 export const enclosingBitsEnvKey = (): string => "__enclosingBits__";
-export const wireSizeEnvKey = (target: string): string => `__wireSize__${target}`;
+export const wireSizeEnvKey = (target: string): string =>
+  `__wireSize__${target}`;
 export const prevIterEnvKey = (field: string): string => `__prevIter__${field}`;
-export const enclosingFieldEnvKey = (field: string): string => `__enclosing__${field}`;
+export const enclosingFieldEnvKey = (field: string): string =>
+  `__enclosing__${field}`;
 
 export class MissingRefError extends Error {
   constructor(public readonly field: string) {
@@ -53,9 +78,12 @@ export function evalExpr(expr: Expr, env: PacketEnv): number {
       const a = evalExpr(expr.a, env);
       const b = evalExpr(expr.b, env);
       switch (expr.op) {
-        case "+": return a + b;
-        case "-": return a - b;
-        case "*": return a * b;
+        case "+":
+          return a + b;
+        case "-":
+          return a - b;
+        case "*":
+          return a * b;
         case "/":
           if (b === 0) throw new Error("evalExpr: division by zero");
           return Math.trunc(a / b);
@@ -71,24 +99,35 @@ export function evalExpr(expr: Expr, env: PacketEnv): number {
         // Left shift masked to an unsigned 32-bit result (§4): JS `<<` is
         // signed, so a high-bit shift like `1 << 31` would yield a negative
         // number; `>>> 0` reinterprets it as the unsigned wire value.
-        case "<<": return (a << b) >>> 0;
+        case "<<":
+          return (a << b) >>> 0;
         // Arithmetic (sign-propagating) right shift, per §4 "Arithmetic right
         // shift; operates on 32-bit integers."
-        case ">>": return a >> b;
-        case "==": return a === b ? 1 : 0;
-        case "!=": return a !== b ? 1 : 0;
-        case "<":  return a < b ? 1 : 0;
-        case "<=": return a <= b ? 1 : 0;
-        case ">":  return a > b ? 1 : 0;
-        case ">=": return a >= b ? 1 : 0;
+        case ">>":
+          return a >> b;
+        case "==":
+          return a === b ? 1 : 0;
+        case "!=":
+          return a !== b ? 1 : 0;
+        case "<":
+          return a < b ? 1 : 0;
+        case "<=":
+          return a <= b ? 1 : 0;
+        case ">":
+          return a > b ? 1 : 0;
+        case ">=":
+          return a >= b ? 1 : 0;
         // §4 (Note on 64-bit fields): bitwise and shift operators are evaluated
         // as 32-bit integers BY DESIGN — JS `&|^` coerce operands via ToInt32,
         // so a value wider than 32 bits is truncated and a high bit may flip the
         // sign. This is the documented spec contract: for fields wider than 32
         // bits, authors must use arithmetic operators and `cond`, not bit ops.
-        case "&":  return (a & b) | 0;
-        case "|":  return (a | b) | 0;
-        case "^":  return (a ^ b) | 0;
+        case "&":
+          return (a & b) | 0;
+        case "|":
+          return a | b | 0;
+        case "^":
+          return (a ^ b) | 0;
         default: {
           const bad = expr.op as string;
           throw new Error(`evalExpr: unknown operator "${bad}"`);
@@ -100,7 +139,8 @@ export function evalExpr(expr: Expr, env: PacketEnv): number {
       return t !== 0 ? evalExpr(expr.t, env) : evalExpr(expr.f, env);
     }
     case "peek": {
-      const offsetVal = expr.offset !== undefined ? evalExpr(expr.offset, env) : 0;
+      const offsetVal =
+        expr.offset !== undefined ? evalExpr(expr.offset, env) : 0;
       return env.get(peekEnvKey(offsetVal, expr.bits)) ?? 0;
     }
     case "lookup": {

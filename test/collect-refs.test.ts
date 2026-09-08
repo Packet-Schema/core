@@ -62,7 +62,10 @@ describe("collectPsdlRefs", () => {
           kind: "repeat",
           id: "r",
           count: "eos",
-          element: { id: "el", fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }] },
+          element: {
+            id: "el",
+            fields: [{ id: "v", name: "V", type: { kind: "int", bits: 8 } }],
+          },
         },
       ],
     };

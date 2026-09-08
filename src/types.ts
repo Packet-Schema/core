@@ -21,8 +21,15 @@ export type CategoryToken =
   | "payload-marker";
 
 export const CATEGORY_TOKENS: readonly CategoryToken[] = [
-  "addressing", "identifier", "length", "type", "flags",
-  "reserved", "checksum", "variable", "payload-marker",
+  "addressing",
+  "identifier",
+  "length",
+  "type",
+  "flags",
+  "reserved",
+  "checksum",
+  "variable",
+  "payload-marker",
 ];
 
 /* ------------------------------------------------------------------ *
@@ -45,7 +52,12 @@ export type BytesDelimited = { delimiter: number[] };
 /** Variable-length byte array; use `n: { kind: remaining }` for "all remaining" (§3). */
 export type TypeBytes = { kind: "bytes"; n: Expr | BytesDelimited };
 
-export type EnumVariantObj = { label: string; doc?: string; level?: NormativeLevel; meta?: FieldMeta };
+export type EnumVariantObj = {
+  label: string;
+  doc?: string;
+  level?: NormativeLevel;
+  meta?: FieldMeta;
+};
 export type EnumVariant = string | EnumVariantObj;
 
 /**
@@ -92,7 +104,11 @@ export type TypeEnum = {
 
 /** Predefined varint encodings; arbitrary strings are also accepted (§3). */
 export const VARINT_ENCODINGS = [
-  "quic", "protobuf", "cbor", "ea-terminated", "leb128",
+  "quic",
+  "protobuf",
+  "cbor",
+  "ea-terminated",
+  "leb128",
 ] as const;
 export type VarintEncoding = string;
 
@@ -102,26 +118,47 @@ export type TypeVarint = { kind: "varint"; encoding: VarintEncoding };
 export type TypeBerLength = { kind: "berLength"; maxBytes?: number };
 
 export type Type =
-  | TypeInt
-  | TypeBits
-  | TypeBytes
-  | TypeEnum
-  | TypeVarint
-  | TypeBerLength;
+  TypeInt | TypeBits | TypeBytes | TypeEnum | TypeVarint | TypeBerLength;
 
 /* ------------------------------------------------------------------ *
  * Expressions
  * ------------------------------------------------------------------ */
 
 export type BinOp =
-  | "+" | "-" | "*" | "/" | "%" | "<<" | ">>"
-  | "==" | "!=" | "<" | "<=" | ">" | ">="
-  | "&" | "|" | "^";
+  | "+"
+  | "-"
+  | "*"
+  | "/"
+  | "%"
+  | "<<"
+  | ">>"
+  | "=="
+  | "!="
+  | "<"
+  | "<="
+  | ">"
+  | ">="
+  | "&"
+  | "|"
+  | "^";
 
 export const BIN_OPS: readonly BinOp[] = [
-  "+", "-", "*", "/", "%", "<<", ">>",
-  "==", "!=", "<", "<=", ">", ">=",
-  "&", "|", "^",
+  "+",
+  "-",
+  "*",
+  "/",
+  "%",
+  "<<",
+  ">>",
+  "==",
+  "!=",
+  "<",
+  "<=",
+  ">",
+  ">=",
+  "&",
+  "|",
+  "^",
 ];
 
 export type ExprLit = { kind: "lit"; value: number };
@@ -136,7 +173,11 @@ export type ExprPeek = { kind: "peek"; bits: number; offset?: Expr };
  * schema constrains `propertyNames` to `^(0|[1-9][0-9]*)$`); the `number` index
  * signature is a convenience that TS coerces to string keys at runtime.
  */
-export type ExprLookup = { kind: "lookup"; key: Expr; table: Record<number, number> };
+export type ExprLookup = {
+  kind: "lookup";
+  key: Expr;
+  table: Record<number, number>;
+};
 /** Wire byte footprint of a named container/field (§4). */
 export type ExprWireSize = { kind: "wireSize"; target: string };
 /** Value of a field from the previous completed repeat iteration (§4, §10.4). */
@@ -167,7 +208,11 @@ export type Expr =
 
 /** Well-known algorithms; arbitrary strings are accepted (§8). */
 export const CHECKSUM_ALGORITHMS = [
-  "internet", "crc32", "crc32c", "crc16", "adler32",
+  "internet",
+  "crc32",
+  "crc32c",
+  "crc16",
+  "adler32",
 ] as const;
 export type ChecksumAlgorithm = string;
 
@@ -202,7 +247,8 @@ export type PseudoHeader = "ipv4" | "ipv6";
  * Display / metadata
  * ------------------------------------------------------------------ */
 
-export type DisplayHint = "dec" | "hex" | "oct" | "bin" | "ascii" | "utf8" | "addr";
+export type DisplayHint =
+  "dec" | "hex" | "oct" | "bin" | "ascii" | "utf8" | "addr";
 
 /**
  * RFC 2119 normative strength. The default when absent is context-dependent:

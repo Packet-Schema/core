@@ -22,11 +22,11 @@ const { cells } = resolveLayout(packet);
 
 同じ言語を 3 つの形で持っている。**食い違ったら仕様書が正典。**
 
-| 層 | 実体 | 役割 |
-|---|---|---|
-| **規範文書** | `spec/psdl-0.5.md`（§1〜§16） | 正典。`spec/psdl-0.5.ja.md` は参考訳 |
-| **機械可読** | `schemas/psdl-0.5.yaml` | JSON Schema。エディタ補完と外部バリデータ用 |
-| **実装** | `src/` | この npm パッケージ |
+| 層           | 実体                          | 役割                                        |
+| ------------ | ----------------------------- | ------------------------------------------- |
+| **規範文書** | `spec/psdl-0.5.md`（§1〜§16） | 正典。`spec/psdl-0.5.ja.md` は参考訳        |
+| **機械可読** | `schemas/psdl-0.5.yaml`       | JSON Schema。エディタ補完と外部バリデータ用 |
+| **実装**     | `src/`                        | この npm パッケージ                         |
 
 スキーマはサブパスで参照できる:
 
@@ -54,27 +54,27 @@ YAML の先頭に pragma を書けばエディタが直接読む:
 
 ### パース / 出力
 
-| | |
-|---|---|
-| `parsePsdl(text)` | YAML → `Packet`。**JSON Schema は実行しない**（後述） |
-| `stringifyPsdl(packet)` | `Packet` → YAML |
+|                         |                                                       |
+| ----------------------- | ----------------------------------------------------- |
+| `parsePsdl(text)`       | YAML → `Packet`。**JSON Schema は実行しない**（後述） |
+| `stringifyPsdl(packet)` | `Packet` → YAML                                       |
 
 ### 検証
 
-| | |
-|---|---|
-| `validatePacket(packet)` | §11.1 の検証エラー。未宣言 ref、前方参照、peek 位置、checksum 幅、値辞書規則など |
-| `validateContainer` / `isValidExpr` | 部分検証 |
+|                                     |                                                                                  |
+| ----------------------------------- | -------------------------------------------------------------------------------- |
+| `validatePacket(packet)`            | §11.1 の検証エラー。未宣言 ref、前方参照、peek 位置、checksum 幅、値辞書規則など |
+| `validateContainer` / `isValidExpr` | 部分検証                                                                         |
 
 ### 正規化とレイアウト
 
-| | |
-|---|---|
-| `normalize(packet, env, opts)` | env を与えて各フィールドの実効幅を確定する。`viewMode: "wire" \| "semantic"` |
-| `resolveLayout(packet, opts)` | 正規化してから行に折り返し、セル座標を返す |
-| `initialEnv(packet)` | 宣言された `defaultValue` から初期 env を作る |
-| `typeBits` / `selectArm` / `isBytesDelimited` | 幅とアーム選択の下請け |
-| `berLenEnvKey` / `varintBitsEnvKey` / `bytesDelimLenEnvKey` | デコーダが実測値を注入する env キー |
+|                                                             |                                                                              |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| `normalize(packet, env, opts)`                              | env を与えて各フィールドの実効幅を確定する。`viewMode: "wire" \| "semantic"` |
+| `resolveLayout(packet, opts)`                               | 正規化してから行に折り返し、セル座標を返す                                   |
+| `initialEnv(packet)`                                        | 宣言された `defaultValue` から初期 env を作る                                |
+| `typeBits` / `selectArm` / `isBytesDelimited`               | 幅とアーム選択の下請け                                                       |
+| `berLenEnvKey` / `varintBitsEnvKey` / `bytesDelimLenEnvKey` | デコーダが実測値を注入する env キー                                          |
 
 `rowBits` を省略した packet は valid で、レンダラは 32 にフォールバックする（§13）。
 
@@ -86,10 +86,10 @@ env キーの合成は `peekEnvKey` / `remainingEnvKey` / `enclosingBitsEnvKey` 
 
 ### 制約
 
-| | |
-|---|---|
+|                                   |                                                            |
+| --------------------------------- | ---------------------------------------------------------- |
 | `propagate` / `propagateFixpoint` | 制約から従属値を導出（IHL を動かすとヘッダ長が追従する類） |
-| `validateConstraints` | 診断を `ConstraintDiagnostic` として level 付きで返す |
+| `validateConstraints`             | 診断を `ConstraintDiagnostic` として level 付きで返す      |
 
 ### その他
 
@@ -101,12 +101,12 @@ env キーの合成は `peekEnvKey` / `remainingEnvKey` / `enclosingBitsEnvKey` 
 
 どこで何が捕まるかを知っておくと、エラーの出どころが分かる。
 
-| 層 | 何を見るか | どこ |
-|---|---|---|
-| **JSON Schema** | 形（kind ごとの必須キー、型、閉集合） | `schemas/psdl-0.5.yaml`（このパッケージは実行しない） |
-| **`validatePacket`** | 意味（未宣言 ref、順序、peek 位置、checksum 幅…） | `src/validate.ts` |
-| **presets の 4 段ゲート** | 上記 + 語彙 + normalize 実行 | `@packet-schema/presets` |
-| **利用側** | アプリ固有の不変条件 | 各利用側 |
+| 層                        | 何を見るか                                        | どこ                                                  |
+| ------------------------- | ------------------------------------------------- | ----------------------------------------------------- |
+| **JSON Schema**           | 形（kind ごとの必須キー、型、閉集合）             | `schemas/psdl-0.5.yaml`（このパッケージは実行しない） |
+| **`validatePacket`**      | 意味（未宣言 ref、順序、peek 位置、checksum 幅…） | `src/validate.ts`                                     |
+| **presets の 4 段ゲート** | 上記 + 語彙 + normalize 実行                      | `@packet-schema/presets`                              |
+| **利用側**                | アプリ固有の不変条件                              | 各利用側                                              |
 
 **注意: `parsePsdl` は JSON Schema を実行しない。** このパッケージは ajv に依存していない（本番依存は `yaml` のみ）。スキーマ検証をしたい利用側は自前で ajv を用意して `schemas/psdl-0.5.yaml` を読む。結果として **presets のゲートのほうが `parsePsdl` より厳しい**。
 

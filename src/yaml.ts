@@ -6,11 +6,11 @@ import { validatePacket } from "./validate.js";
 import type { Packet } from "./types.js";
 
 export type ParseResult =
-  | { ok: true; packet: Packet }
-  | { ok: false; errors: string[] };
+  { ok: true; packet: Packet } | { ok: false; errors: string[] };
 
 type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
+const isObj = (v: unknown): v is Obj =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
 
 /* ------------------------------------------------------------------ *
  * Authoring shorthand normalization (§4):
@@ -71,16 +71,21 @@ function normContainer(node: unknown): unknown {
       if ("container" in o) o.container = normContainer(o.container);
       return o;
     case "repeat":
-      if (isObj(o.count) && "until" in o.count) o.count = { until: toExpr(o.count.until) };
-      else if (o.count !== "eos" && o.count !== undefined) o.count = toExpr(o.count);
-      if (isObj(o.element)) o.element = { ...o.element, fields: normContainers(o.element.fields) };
+      if (isObj(o.count) && "until" in o.count)
+        o.count = { until: toExpr(o.count.until) };
+      else if (o.count !== "eos" && o.count !== undefined)
+        o.count = toExpr(o.count);
+      if (isObj(o.element))
+        o.element = { ...o.element, fields: normContainers(o.element.fields) };
       return o;
     case "switch": {
       if ("on" in o) o.on = toExpr(o.on);
       if (isObj(o.cases)) {
         const cases: Obj = {};
         for (const [k, arm] of Object.entries(o.cases))
-          cases[k] = isObj(arm) ? { ...arm, fields: normContainers(arm.fields) } : arm;
+          cases[k] = isObj(arm)
+            ? { ...arm, fields: normContainers(arm.fields) }
+            : arm;
         o.cases = cases;
       }
       return o;
@@ -91,7 +96,11 @@ function normContainer(node: unknown): unknown {
       return o;
     case "encrypted":
       if (o.wireBits !== undefined) o.wireBits = toExpr(o.wireBits);
-      if (isObj(o.plaintext)) o.plaintext = { ...o.plaintext, fields: normContainers(o.plaintext.fields) };
+      if (isObj(o.plaintext))
+        o.plaintext = {
+          ...o.plaintext,
+          fields: normContainers(o.plaintext.fields),
+        };
       return o;
     case "group":
       o.children = normContainers(o.children);
@@ -107,12 +116,15 @@ function normalizeShorthands(raw: Obj): Obj {
   if (isObj(out.defs)) {
     const defs: Obj = {};
     for (const [k, def] of Object.entries(out.defs))
-      defs[k] = isObj(def) ? { ...def, fields: normContainers(def.fields) } : def;
+      defs[k] = isObj(def)
+        ? { ...def, fields: normContainers(def.fields) }
+        : def;
     out.defs = defs;
   }
   if (Array.isArray(out.constraints))
     out.constraints = out.constraints.map((c) =>
-      isObj(c) ? { ...c, lhs: toExpr(c.lhs), rhs: toExpr(c.rhs) } : c);
+      isObj(c) ? { ...c, lhs: toExpr(c.lhs), rhs: toExpr(c.rhs) } : c,
+    );
   return out;
 }
 
@@ -132,7 +144,8 @@ export function parsePsdl(source: string): ParseResult {
   }
   const packet = normalizeShorthands(raw) as unknown as Packet;
   const errors = validatePacket(packet);
-  if (errors.length > 0) return { ok: false, errors: errors.map((e) => e.message) };
+  if (errors.length > 0)
+    return { ok: false, errors: errors.map((e) => e.message) };
   return { ok: true, packet };
 }
 

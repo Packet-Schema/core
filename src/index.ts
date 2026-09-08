@@ -71,7 +71,12 @@ export type {
   SubCell,
   ResolvedLayout,
 } from "./types.js";
-export { VARINT_ENCODINGS, CHECKSUM_ALGORITHMS, CATEGORY_TOKENS, BIN_OPS } from "./types.js";
+export {
+  VARINT_ENCODINGS,
+  CHECKSUM_ALGORITHMS,
+  CATEGORY_TOKENS,
+  BIN_OPS,
+} from "./types.js";
 
 // Expression helpers & evaluator
 export {
@@ -101,7 +106,16 @@ export {
 } from "./expr.js";
 
 // Normalize
-export { normalize, initialEnv, typeBits, berLenEnvKey, varintBitsEnvKey, bytesDelimLenEnvKey, isBytesDelimited, selectArm } from "./normalize.js";
+export {
+  normalize,
+  initialEnv,
+  typeBits,
+  berLenEnvKey,
+  varintBitsEnvKey,
+  bytesDelimLenEnvKey,
+  isBytesDelimited,
+  selectArm,
+} from "./normalize.js";
 export type { NormalizeOptions } from "./normalize.js";
 
 // Layout
@@ -109,8 +123,17 @@ export { resolveLayout } from "./layout.js";
 export type { LayoutOptions } from "./layout.js";
 
 // Constraint solver
-export { propagate, propagateFixpoint, validateConstraints } from "./constraint.js";
-export type { PropagateResult, PropagateOk, PropagateConflict, ConstraintDiagnostic } from "./constraint.js";
+export {
+  propagate,
+  propagateFixpoint,
+  validateConstraints,
+} from "./constraint.js";
+export type {
+  PropagateResult,
+  PropagateOk,
+  PropagateConflict,
+  ConstraintDiagnostic,
+} from "./constraint.js";
 
 // Validation
 export { validatePacket, validateContainer, isValidExpr } from "./validate.js";

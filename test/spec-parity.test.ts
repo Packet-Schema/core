@@ -10,15 +10,24 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 
-const EN = readFileSync(new URL("../spec/psdl-0.5.md", import.meta.url), "utf8");
-const JA = readFileSync(new URL("../spec/psdl-0.5.ja.md", import.meta.url), "utf8");
+const EN = readFileSync(
+  new URL("../spec/psdl-0.5.md", import.meta.url),
+  "utf8",
+);
+const JA = readFileSync(
+  new URL("../spec/psdl-0.5.ja.md", import.meta.url),
+  "utf8",
+);
 
 /** Heading levels in document order, ignoring anything inside a code fence. */
 function headingLevels(md: string): number[] {
   const out: number[] = [];
   let inFence = false;
   for (const line of md.split("\n")) {
-    if (line.startsWith("```")) { inFence = !inFence; continue; }
+    if (line.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
     if (inFence) continue;
     const m = /^(#+)\s+\S/.exec(line);
     if (m) out.push(m[1].length);
@@ -31,7 +40,10 @@ function sectionNumbers(md: string): string[] {
   const out: string[] = [];
   let inFence = false;
   for (const line of md.split("\n")) {
-    if (line.startsWith("```")) { inFence = !inFence; continue; }
+    if (line.startsWith("```")) {
+      inFence = !inFence;
+      continue;
+    }
     if (inFence) continue;
     const m = /^#+\s+(\d+(?:\.\d+)*)\.?\s/.exec(line);
     if (m) out.push(m[1]);
@@ -50,7 +62,10 @@ function codeBlocks(md: string): string[] {
   for (const line of md.split("\n")) {
     if (line.startsWith("```")) {
       if (cur === null) cur = [];
-      else { out.push(cur.join("\n")); cur = null; }
+      else {
+        out.push(cur.join("\n"));
+        cur = null;
+      }
       continue;
     }
     if (cur !== null) {
@@ -102,6 +117,8 @@ describe("spec parity — EN is normative, JA is a translation", () => {
       }
       return n;
     };
-    expect(rows(JA, "11.1", "検証エラー")).toBe(rows(EN, "11.1", "Validation error"));
+    expect(rows(JA, "11.1", "検証エラー")).toBe(
+      rows(EN, "11.1", "Validation error"),
+    );
   });
 });

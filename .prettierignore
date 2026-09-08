@@ -1,0 +1,10 @@
+node_modules
+dist
+
+# The normative spec and its translation. Prettier reflows Markdown tables and
+# wrapped prose, which would churn a 3,300-line document and fight the
+# EN/JA structural parity test.
+spec
+
+# Authored JSON Schema; the column alignment is load-bearing for readability.
+schemas

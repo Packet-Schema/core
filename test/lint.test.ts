@@ -79,7 +79,10 @@ describe("lintPacket — §11.4", () => {
       defs: { addr },
       body: [{ kind: "ref", ref: "addr", id: "src", name: "Src" }],
       constraints: [
-        { lhs: { kind: "ref", field: "src.oct0" }, rhs: { kind: "lit", value: 4 } },
+        {
+          lhs: { kind: "ref", field: "src.oct0" },
+          rhs: { kind: "lit", value: 4 },
+        },
       ],
     };
     expect(rules(pkt)).not.toContain("constraint-in-recursive-def");
@@ -101,9 +104,13 @@ describe("lintPacket — §11.4", () => {
         },
       ],
     });
-    expect(rules(withCrc("crc32"))).toContain("checksum-params-override-named-crc");
+    expect(rules(withCrc("crc32"))).toContain(
+      "checksum-params-override-named-crc",
+    );
     // A custom name is exactly what the advisory suggests, so it must be quiet.
-    expect(rules(withCrc("myCrc"))).not.toContain("checksum-params-override-named-crc");
+    expect(rules(withCrc("myCrc"))).not.toContain(
+      "checksum-params-override-named-crc",
+    );
   });
 
   it("4. warns on a zero mask and on overlapping masks", () => {
@@ -116,7 +123,11 @@ describe("lintPacket — §11.4", () => {
           id: "flags",
           name: "Flags",
           type: { kind: "int", bits: 8 },
-          subfields: masks.map((m, i) => ({ id: `s${i}`, name: `S${i}`, mask: m })),
+          subfields: masks.map((m, i) => ({
+            id: `s${i}`,
+            name: `S${i}`,
+            mask: m,
+          })),
         },
       ],
     });

@@ -36,7 +36,7 @@ export function berLenEnvKey(fieldId: string): string {
 
 /**
  * Decoder-injected wire byte length of a delimiter-terminated `bytes` field
- * (§3/§10.7, D3). Keyed by the field's fully-qualified id under a dedicated
+ * (§3/§10.7). Keyed by the field's fully-qualified id under a dedicated
  * namespace so it never collides with env[id] (the field's value slot) or any
  * other injection key. With no injection (static preview) the length is unknown
  * and the field lays out as 0 bytes.
@@ -45,7 +45,7 @@ export function bytesDelimLenEnvKey(qid: string): string {
   return `__bytesDelimLen__${qid}`;
 }
 
-/** True if a `bytes.n` is the delimiter form rather than an Expr (§3, D3). */
+/** True if a `bytes.n` is the delimiter form rather than an Expr (§3). */
 export function isBytesDelimited(n: unknown): n is BytesDelimited {
   return typeof n === "object" && n !== null && !Array.isArray(n) && "delimiter" in n &&
     Array.isArray((n as { delimiter?: unknown }).delimiter);
@@ -382,7 +382,7 @@ function emit(state: WalkState, field: Field, path: string): void {
     // normalized/layout output so LSP and renderers can surface them.
     ...(field.values !== undefined ? { values: field.values } : {}),
     ...(field.meta !== undefined ? { meta: field.meta } : {}),
-    // §12 (D4): mask-addressed subfields ride through for LSP/codegen value decode.
+    // §12: mask-addressed subfields ride through for LSP/codegen value decode.
     ...(field.subfields !== undefined ? { subfields: field.subfields } : {}),
     // §8: checksum binding rides through so codegen/LSP can read the algorithm,
     // covered fields, pseudo-header, and CRC parameters (width included).
@@ -753,7 +753,7 @@ export function selectArm(
 }
 
 /**
- * §5 (D6): tag plaintext-external header-protected fields. A headerProtected id
+ * §5: tag plaintext-external header-protected fields. A headerProtected id
  * that names a field declared earlier in the same body (not a plaintext field)
  * is tagged on the already-emitted NormalizedField. Matching is by exact
  * emitted id (a top-level/direct header field emits with id === its bare id),

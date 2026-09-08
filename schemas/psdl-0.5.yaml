@@ -629,7 +629,7 @@ $defs:
           - { type: string, pattern: '^0x[0-9A-Fa-f]+$' }
         description: |-
           Bit mask over the parent's decoded value (bit 0 = LSB). A bare integer
-          for ≤ 2^53−1; a 0x hex string for wider masks (D9 precedent), decoded
+          for ≤ 2^53−1; a 0x hex string for wider masks (§8 precedent), decoded
           at full 64-bit precision.
       doc:      { type: string }
       values:   { type: array, items: { $ref: '#/$defs/ValueEntry' } }

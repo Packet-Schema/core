@@ -224,6 +224,10 @@ and protocol linking.
   generated. These dotted forms are used in expressions and `checksumCovers`
   but are never authored directly in YAML.
 - Import namespace prefixes (§1.2) further qualify def names: `addr.ipv4Addr`.
+  An import `as` prefix and a local `defs` key therefore share one dotted
+  namespace, and declaring both with the same name is a **validation error**:
+  `addr.ipv4Addr` would be ambiguous between the imported def and a dotted
+  reach into the local def `addr`, and nothing in the grammar separates them.
 - **Expanded-id uniqueness.** Within one document, no two declarations may share
   the same **expanded id** while both can be live in the `env` at the same time.
   The *expanded id* of a field/container is the id of the emitted leaf — the
@@ -857,11 +861,22 @@ n:
 - The 'absolute budget' of a scope is `(bytes already consumed) + remaining`;
   where an absolute byte total is genuinely needed, reference the relevant
   length field directly. For bit-precision needs use `enclosingBits` below.
-- **Sub-byte rounding.** `bytes already consumed` is measured as
-  `ceil(bits consumed in scope / 8)` — a partially-consumed byte counts as
-  fully consumed (matching the `align` round-up rule in §5). Consequently
-  `remaining` is only well-defined for sizing a `bytes` field when the cursor
-  is byte-aligned; using `remaining` to size data while mid-byte is a
+- **Sub-byte rounding.** `remaining` is computed from the raw bit gap:
+
+  ```
+  remaining = max(0, floor((scope budget in bits - bits consumed in scope) / 8))
+  ```
+
+  The subtraction happens in bits and the floor is applied once, at the end.
+  Rounding each side separately — `floor(budget/8) - ceil(consumed/8)` — charges
+  a partial trailing budget byte *and* a mid-byte cursor, penalising the same
+  boundary twice and under-reporting by one whenever a scope's budget is not a
+  whole number of bytes (an `encrypted` region with a sub-byte `wireBits`, for
+  instance). The two forms agree whenever the budget is byte-aligned, which is
+  every case a byte-aligned cursor can observe.
+
+  `remaining` is still only well-defined for sizing a `bytes` field when the
+  cursor is byte-aligned; using `remaining` to size data while mid-byte is a
   **runtime error**. Size a final `bytes` field only after a byte boundary
   (insert an `align` first if a preceding sub-byte field left the cursor
   mid-byte), or use `enclosingBits` arithmetic for sub-byte regions.
@@ -2797,9 +2812,6 @@ revision, not part of 0.5.
 | `subfields` on a field that is not an `int` or a byte-aligned `bits` field (§12) | Validation error |
 | A `subfields` `mask` does not fit within the field's declared bit width (`mask ≥ 2^bits`) (§12) | Validation error |
 | A `subfields` `mask` is neither a non-negative integer nor a `^0x[0-9A-Fa-f]+$` hex string (§12) | Validation error |
-| Field id appears in more than one `rendererHints.sections` entry | Validation error |
-| `rendererHints.sections` entry has an empty `fields` list | Validation error |
-| `rendererHints.sections.fields` entry does not correspond to any top-level body container or field id | Validation error |
 | `align` container `to` value is not a positive power of 2 that is a multiple of 8 | Validation error |
 | `lookup` table key is not a non-negative decimal integer | Validation error |
 | `lookup` table value is not a non-negative decimal integer | Validation error |
@@ -3046,15 +3058,20 @@ The following container kinds are valid entries in `sections.fields`:
 | Bounded `id` | Assigns the bounded scope container to the section |
 | Encrypted `id` | Assigns the encrypted container to the section |
 
-Any other value (including an id that does not correspond to any body
-container or field) is a validation error (see §11.1).
+**Status: metadata only.** Like the `next` map of §7, `sections` is metadata
+that the reference validator imposes no checks on; consuming it — and deciding
+what to do with a malformed entry — is the tool layer's concern. The shape above
+is normative so that tools agree on how to read a well-formed document, but a
+document is not invalid for getting it wrong.
 
-**Section rules:**
+For interoperable tools the intended reading is:
 
-- A section `fields` list must not be empty; a section with zero field ids
-  is a validation error.
-- A field id must not appear in more than one section; a duplicate listing
-  across sections is a validation error.
+- A section `fields` list is expected to be non-empty; a section with zero
+  field ids labels nothing.
+- A field id is expected to appear in at most one section. A renderer that
+  encounters a duplicate SHOULD use the first listing and ignore the rest.
+- An entry that names no body container or field has nothing to assign and
+  SHOULD be ignored.
 - Section order in `rendererHints.sections` is independent of body field order
   and represents the desired display order only. Renderers SHOULD present
   sections in the order listed and fields within each section in the order

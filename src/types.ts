@@ -32,7 +32,7 @@ export const CATEGORY_TOKENS: readonly CategoryToken[] = [
 export type TypeInt = { kind: "int"; bits: number; signed?: boolean };
 export type TypeBits = { kind: "bits"; n: number };
 /**
- * Delimiter-terminated byte length (§3, D3). The field spans from the current
+ * Delimiter-terminated byte length (§3). The field spans from the current
  * parse position up to and including the first complete occurrence of the
  * delimiter byte sequence; the delimiter is always consumed and is part of the
  * field's wire footprint (and of any `display` rendering). `delimiter` is a
@@ -236,7 +236,7 @@ export type FieldMeta = { rfc?: RfcRef; section?: string };
 
 /**
  * Author-facing bit-field annotation over a parent `int`/byte-aligned-`bits`
- * field (§12, D4). A subfield decodes a slice of the parent's BYTE-ORDER-RESOLVED
+ * field (§12). A subfield decodes a slice of the parent's BYTE-ORDER-RESOLVED
  * integer value: its value is `(fieldValue & mask) >> lowestSetBit(mask)`, with
  * bit 0 = the least-significant bit (identical to ValueEntry.pattern's bit-0=LSB
  * convention, §5.3). Because the convention is defined over the *decoded value*,
@@ -252,7 +252,7 @@ export type FieldMeta = { rfc?: RfcRef; section?: string };
  * guaranteed by 0.5** and is a candidate for a follow-up revision (§12).
  *
  * `mask` is a non-negative integer; a hex string is permitted for masks needing
- * more than 53 bits (the D9 precedent), and tools MUST decode such masks at full
+ * more than 53 bits (the §8 checksumParams precedent), and tools MUST decode such masks at full
  * 64-bit precision.
  */
 export type Subfield = {
@@ -289,7 +289,7 @@ export type Field = {
   computedFrom?: ExprWireSize;
   /**
    * Mask-addressed bit subfields over this `int` / byte-aligned `bits` field
-   * (§12, D4). Display/annotation only; value bit 0 = LSB of the decoded value.
+   * (§12). Display/annotation only; value bit 0 = LSB of the decoded value.
    */
   subfields?: readonly Subfield[];
 };
@@ -533,7 +533,7 @@ export type NormalizedField = {
   values?: readonly ValueEntry[];
   /** RFC provenance copied verbatim from the source Field (§5.4). */
   meta?: FieldMeta;
-  /** Mask-addressed bit subfields copied verbatim from the source Field (§12, D4). */
+  /** Mask-addressed bit subfields copied verbatim from the source Field (§12). */
   subfields?: readonly Subfield[];
   /** Checksum algorithm copied verbatim from the source Field, for codegen (§8). */
   checksumAlgorithm?: ChecksumAlgorithm;

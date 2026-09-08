@@ -1415,3 +1415,59 @@ describe("validatePacket — subfields (§12/§11.1, D4)", () => {
       .some((m) => /has unknown key "bogus"/.test(m))).toBe(true);
   });
 });
+
+describe("checksumCovers (§8/§11.1)", () => {
+  const withCovers = (covers: string[]): Packet => ({
+    name: "t",
+    rowBits: 32,
+    body: [
+      { id: "a", name: "A", type: { kind: "int", bits: 8 } },
+      { id: "b", name: "B", type: { kind: "int", bits: 8 } },
+      {
+        id: "ck",
+        name: "Ck",
+        category: "checksum",
+        type: { kind: "int", bits: 16 },
+        checksumAlgorithm: "internet",
+        checksumCovers: covers,
+      },
+    ],
+  });
+
+  it("accepts ids declared in the packet", () => {
+    expect(validatePacket(withCovers(["a", "b"]))).toEqual([]);
+  });
+
+  it("rejects an id that is not declared anywhere", () => {
+    // §8 treats checksumCovers as the canonical ordering of the checksum's
+    // input stream, so a name that resolves to nothing is not a harmless typo.
+    const errs = validatePacket(withCovers(["a", "nope"]));
+    expect(errs.some((e) => /checksumCovers "nope" is not declared/.test(e.message))).toBe(true);
+  });
+
+  it("rejects an import-qualified def name", () => {
+    const pkt: Packet = {
+      name: "t",
+      rowBits: 32,
+      imports: [{ from: "./addr.psdl.yaml", as: "addr" }],
+      defs: {
+        ipv4Addr: { id: "ipv4Addr", fields: [{ id: "oct0", name: "O0", type: { kind: "int", bits: 8 } }] },
+      },
+      body: [
+        { kind: "ref", ref: "ipv4Addr", id: "src", name: "Src" },
+        {
+          id: "ck",
+          name: "Ck",
+          category: "checksum",
+          type: { kind: "int", bits: 16 },
+          checksumAlgorithm: "internet",
+          // Imports expand under their INSTANTIATION id, so the covered name
+          // must be `src` / `src.oct0` — never the import prefix.
+          checksumCovers: ["addr.ipv4Addr"],
+        },
+      ],
+    };
+    const errs = validatePacket(pkt);
+    expect(errs.some((e) => /import-qualified def name/.test(e.message))).toBe(true);
+  });
+});

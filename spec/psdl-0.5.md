@@ -3,6 +3,10 @@
 A YAML-based language for describing the wire format of network protocol packets.
 The formal JSON Schema is at `schemas/psdl-0.5.yaml`.
 
+**This document is normative.** `psdl-0.5.ja.md` is a translation provided for
+convenience; where the two disagree, this document governs. A change to the
+language is made here first, and the translation follows.
+
 ---
 
 ## 1. Document structure
